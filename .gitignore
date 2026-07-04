@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+.claude/settings.local.json
+
+# Locally generated data caches - regenerate via the app's fetch buttons
+nse_etf_data.db
+nse_etf_trend.csv
+nse_etf_weekly_volume.csv

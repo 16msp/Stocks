@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "streamlit-dashboard",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "source venv/bin/activate && exec streamlit run app.py --server.headless=true --server.port=$PORT"],
+      "port": 8501,
+      "autoPort": true
+    }
+  ]
+}
