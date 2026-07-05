@@ -5,3 +5,4 @@ tabulate
 streamlit
 plotly
 openpyxl
+scipy

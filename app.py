@@ -36,6 +36,12 @@ st.markdown(
     "average down twice more, exit at +25%/<1yr or 15% CAGR/>=1yr) across every NSE ETF.\n"
     "- **ATH Averaging Live** - paper-trades that same rule in real time across the whole "
     "ETF universe and alerts you when to sell.\n"
+    "- **ATH Strategy Optimizer** - finds each ETF's own best entry-depth/exit-target combination "
+    "from its own history, instead of one fixed rule for everything.\n"
+    "- **Cash Flow Planner** - shows how many trades overlap and how much capital that ties up, "
+    "plus a simulator for whether your real starting capital + monthly infusion could keep up.\n"
+    "- **ETF Correlation Baskets** - groups correlated ETFs into baskets and compares trading "
+    "everything vs. one representative per basket, under the same limited capital.\n"
     "\nMore strategies will show up here as they're added."
 )
 

@@ -80,10 +80,12 @@ def get_universe_symbol_list(min_avg_volume: int = MIN_AVG_VOLUME) -> list[str]:
 def _simulate_symbol(df: pd.DataFrame) -> list[dict]:
     """df: single symbol's daily close/high/low/open, sorted by date. Returns tranche records.
 
-    ATH tracking and entry/averaging/exit "touch" checks use day_high/day_low =
-    max/min(open, close) rather than the raw intraday high/low - a fleeting
-    intraday tick isn't reliably tradable, but the open and close are real,
-    settled prices you could actually have transacted at.
+    ATH is tracked off closing price alone - the standard, official reference
+    (matches what platforms like TradingView report) and immune to a bad
+    print in a single other field. Entry/averaging/exit "touch" checks use
+    day_high/day_low = max/min(open, close) rather than the raw intraday
+    high/low - a fleeting intraday tick isn't reliably tradable, but the open
+    and close are real, settled prices you could actually have transacted at.
     """
     dates = df["date"].to_numpy()
     close = df["close"].to_numpy()
@@ -96,7 +98,7 @@ def _simulate_symbol(df: pd.DataFrame) -> list[dict]:
     n = len(df)
     if n == 0:
         return []
-    ath = np.maximum.accumulate(np.nan_to_num(day_high, nan=-np.inf))
+    ath = np.maximum.accumulate(np.nan_to_num(close, nan=-np.inf))
 
     trades: list[dict] = []
     cycle: list[dict] = []
@@ -374,8 +376,8 @@ def check_signals(symbols: list[str] | None = None) -> AthLiveResult:
             else:
                 latest_high = max(latest_open, latest_close)
                 latest_low = min(latest_open, latest_close)
-            day_high_series = df[["open", "close"]].max(axis=1)  # pandas row-max skips NaN
-            ath = day_high_series.max()
+            # ATH tracked off closing price alone - see _simulate_symbol docstring.
+            ath = df["close"].max()
             description = meta.get(sym, "")
 
             open_rows = pd.read_sql_query(
