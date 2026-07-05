@@ -14,6 +14,7 @@ Data flow:
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
@@ -79,10 +81,20 @@ def _connect() -> sqlite3.Connection:
             symbol TEXT NOT NULL,
             close REAL,
             volume INTEGER,
+            high REAL,
+            low REAL,
+            open REAL,
             PRIMARY KEY (date, symbol)
         )
         """
     )
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(daily_prices)")}
+    if "high" not in existing_cols:
+        conn.execute("ALTER TABLE daily_prices ADD COLUMN high REAL")
+    if "low" not in existing_cols:
+        conn.execute("ALTER TABLE daily_prices ADD COLUMN low REAL")
+    if "open" not in existing_cols:
+        conn.execute("ALTER TABLE daily_prices ADD COLUMN open REAL")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS etf_meta (
@@ -91,8 +103,40 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS backfill_state (
+            symbol TEXT PRIMARY KEY,
+            deep_backfilled_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS paper_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sector TEXT NOT NULL,
+            entry_date TEXT NOT NULL,
+            entry_index REAL NOT NULL,
+            entry_threshold REAL NOT NULL,
+            target_pct REAL NOT NULL,
+            horizon_days INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            exit_date TEXT,
+            exit_index REAL,
+            exit_reason TEXT,
+            return_pct REAL
+        )
+        """
+    )
     conn.commit()
     return conn
+
+
+def get_connection() -> sqlite3.Connection:
+    """Public entry point for other strategy modules that need direct DB access
+    (e.g. the paper-trades table used by sector_reversal_live)."""
+    return _connect()
 
 
 def get_db_status() -> dict:
@@ -134,13 +178,25 @@ def _upsert_meta(conn: sqlite3.Connection, meta_df: pd.DataFrame) -> None:
 
 
 def _upsert_prices(conn: sqlite3.Connection, prices_df: pd.DataFrame) -> int:
-    rows = list(prices_df[["date", "symbol", "close", "volume"]].itertuples(index=False, name=None))
+    rows = list(prices_df[["date", "symbol", "close", "volume", "high", "low", "open"]].itertuples(index=False, name=None))
     conn.executemany(
-        "INSERT OR REPLACE INTO daily_prices (date, symbol, close, volume) VALUES (?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO daily_prices (date, symbol, close, volume, high, low, open) VALUES (?, ?, ?, ?, ?, ?, ?)",
         rows,
     )
     conn.commit()
     return len(rows)
+
+
+def _get_first_dates(conn: sqlite3.Connection, symbols: list[str]) -> dict:
+    """Earliest stored date per symbol, for deciding which symbols still need a deep backfill."""
+    if not symbols:
+        return {}
+    placeholders = ",".join("?" * len(symbols))
+    rows = conn.execute(
+        f"SELECT symbol, MIN(date) FROM daily_prices WHERE symbol IN ({placeholders}) GROUP BY symbol",
+        symbols,
+    ).fetchall()
+    return {sym: datetime.strptime(d, "%Y-%m-%d").date() for sym, d in rows}
 
 
 # --------------------------------------------------------------------------
@@ -148,7 +204,7 @@ def _upsert_prices(conn: sqlite3.Connection, prices_df: pd.DataFrame) -> int:
 # --------------------------------------------------------------------------
 
 def _fetch_history(symbols: list[str], start: date, end: date) -> pd.DataFrame:
-    """Return long-format DataFrame: date, symbol, close, volume."""
+    """Return long-format DataFrame: date, symbol, close, high, low, open, volume."""
     yahoo_symbols = [f"{s}.NS" for s in symbols]
     start_str = start.strftime("%Y-%m-%d")
     end_str = (end + timedelta(days=1)).strftime("%Y-%m-%d")  # yfinance end is exclusive
@@ -178,8 +234,8 @@ def _fetch_history(symbols: list[str], start: date, end: date) -> pd.DataFrame:
         for ysym in chunk:
             base = ysym[:-3]  # strip ".NS"
             try:
-                sub = data["Close"] if len(chunk) == 1 else data[ysym]
-                sub = sub[["Close", "Volume"]].dropna()
+                sub = data[ysym]
+                sub = sub[["Close", "High", "Low", "Open", "Volume"]].dropna(subset=["Close", "Volume"])
             except (KeyError, TypeError):
                 continue
             if sub.empty:
@@ -187,11 +243,11 @@ def _fetch_history(symbols: list[str], start: date, end: date) -> pd.DataFrame:
             sub = sub.reset_index()
             sub["symbol"] = base
             sub["date"] = sub["Date"].dt.strftime("%Y-%m-%d")
-            sub = sub.rename(columns={"Close": "close", "Volume": "volume"})
-            frames.append(sub[["date", "symbol", "close", "volume"]])
+            sub = sub.rename(columns={"Close": "close", "High": "high", "Low": "low", "Open": "open", "Volume": "volume"})
+            frames.append(sub[["date", "symbol", "close", "high", "low", "open", "volume"]])
 
     if not frames:
-        return pd.DataFrame(columns=["date", "symbol", "close", "volume"])
+        return pd.DataFrame(columns=["date", "symbol", "close", "high", "low", "open", "volume"])
     return pd.concat(frames, ignore_index=True)
 
 
@@ -257,13 +313,103 @@ def fetch(progress: Progress = _noop) -> FetchResult:
 
 
 # --------------------------------------------------------------------------
+# deep historical backfill (one-time, for backtesting - separate from the
+# regular incremental fetch() used by the weekly refresh button)
+# --------------------------------------------------------------------------
+
+DEEP_BACKFILL_TARGET_START = date(2005, 1, 1)  # before any NSE ETF existed
+
+
+@dataclass
+class BackfillResult:
+    ran: bool
+    symbols_checked: int = 0
+    symbols_skipped: int = 0
+    symbols_fetched: int = 0
+    rows_stored: int = 0
+    message: str = ""
+
+
+def backfill_history(symbols: list[str], force: bool = False, progress: Progress = _noop) -> BackfillResult:
+    """One-time deep backfill of full available history for the given symbols
+    (e.g. sector ETFs), so there's enough data to backtest across market
+    cycles. Idempotent and cheap to re-run: once a symbol has been deep-
+    backfilled it's recorded in backfill_state, and subsequent calls skip it
+    (unless force=True) - so this never re-downloads years of data it already
+    has. Safe to call alongside the regular fetch() used for weekly refreshes
+    - they write to the same daily_prices table.
+    """
+    conn = _connect()
+    try:
+        if force:
+            to_fetch = symbols
+            skipped = 0
+        else:
+            done = {row[0] for row in conn.execute("SELECT symbol FROM backfill_state")}
+            to_fetch = [s for s in symbols if s not in done]
+            skipped = len(symbols) - len(to_fetch)
+
+        if not to_fetch:
+            progress(f"All {len(symbols)} symbols already deep-backfilled - nothing to do.")
+            return BackfillResult(ran=False, symbols_checked=len(symbols), symbols_skipped=skipped, message="Already up to date.")
+
+        progress(f"{skipped} symbol(s) already deep-backfilled, skipping. Fetching full history for {len(to_fetch)} symbol(s)...")
+        prices = _fetch_history(to_fetch, DEEP_BACKFILL_TARGET_START, date.today())
+        if prices.empty:
+            msg = "No historical data returned."
+            progress(msg)
+            return BackfillResult(ran=True, symbols_checked=len(symbols), symbols_skipped=skipped, message=msg)
+
+        n_rows = _upsert_prices(conn, prices)
+        n_symbols = prices["symbol"].nunique()
+        now = datetime.now().isoformat(timespec="seconds")
+        conn.executemany(
+            "INSERT OR REPLACE INTO backfill_state (symbol, deep_backfilled_at) VALUES (?, ?)",
+            [(s, now) for s in to_fetch],
+        )
+        conn.commit()
+        msg = f"Deep-backfilled {n_symbols} symbol(s), {n_rows} rows ({prices['date'].min()} to {prices['date'].max()})."
+        progress(msg)
+        return BackfillResult(
+            ran=True,
+            symbols_checked=len(symbols),
+            symbols_skipped=skipped,
+            symbols_fetched=n_symbols,
+            rows_stored=n_rows,
+            message=msg,
+        )
+    finally:
+        conn.close()
+
+
+def get_history_depth(symbols: list[str]) -> pd.DataFrame:
+    """Per-symbol earliest stored date + row count, so the UI can show how much backtestable history exists."""
+    conn = _connect()
+    try:
+        first_dates = _get_first_dates(conn, symbols)
+        rows = conn.execute(
+            f"SELECT symbol, COUNT(*) FROM daily_prices WHERE symbol IN ({','.join('?' * len(symbols))}) GROUP BY symbol",
+            symbols,
+        ).fetchall() if symbols else []
+        counts = dict(rows)
+    finally:
+        conn.close()
+    out = pd.DataFrame({"symbol": symbols})
+    out["first_date"] = out["symbol"].map(first_dates)
+    out["days_stored"] = out["symbol"].map(counts).fillna(0).astype(int)
+    today = date.today()
+    out["years_of_history"] = out["first_date"].apply(lambda d: (today - d).days / 365.25 if pd.notna(d) else 0.0)
+    return out
+
+
+# --------------------------------------------------------------------------
 # shared helpers (also used by other strategies, e.g. sector_reversal)
 # --------------------------------------------------------------------------
 
 def read_daily_prices() -> pd.DataFrame:
-    """All stored daily close/volume rows, across every tracked ETF."""
+    """All stored daily close/high/low/open/volume rows, across every tracked ETF."""
     if not DB_PATH.exists():
-        return pd.DataFrame(columns=["date", "symbol", "close", "volume"])
+        return pd.DataFrame(columns=["date", "symbol", "close", "high", "low", "open", "volume"])
     conn = sqlite3.connect(DB_PATH)
     try:
         return pd.read_sql_query("SELECT * FROM daily_prices", conn, parse_dates=["date"])
@@ -281,18 +427,140 @@ def read_meta() -> pd.DataFrame:
         conn.close()
 
 
-def drop_bad_ticks(prices: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Drop suspected bad ticks: a single-session close move bigger than
-    BAD_TICK_THRESHOLD is essentially never real for an ETF and usually
-    means a bad Yahoo Finance print (e.g. a misplaced decimal).
+_CATEGORY_SUFFIXES = ("totalreturnindex", "totalreturn", "tri", "index", "etf")
 
-    Returns (cleaned_prices, dropped_rows).
+# AMC/provider brand names that show up as a literal prefix in some categories
+# (e.g. "HDFC NIFTY IT ETF", "Mirae Asset Nifty IT ETF") instead of a plain
+# index name (e.g. "Nifty IT TRI") - without stripping these, the same
+# underlying index gets a different group key per AMC and dedup silently
+# fails for every ETF whose category is written in "<Brand> <Index> ETF"
+# form. Longest-first so e.g. "miraeassetmutualfund" is tried before
+# "miraeasset".
+_PROVIDER_PREFIXES = tuple(sorted(
+    [
+        "adityabirlasunlife", "axis", "bajajfinserv", "barodabnpparibas", "dsp",
+        "edelweiss", "hdfc", "iciciprudential", "kotak", "licmf", "lic",
+        "miraeassetmutualfund", "miraeasset", "motilaloswal", "sbi", "shriram",
+        "uti", "zerodha",
+    ],
+    key=len, reverse=True,
+))
+
+
+def _normalize_category(category: str) -> str:
+    """Collapse near-duplicate NSE category strings (e.g. 'Nifty 50', 'Nifty 50
+    Index', 'Nifty 50 Index - TRI', 'Nifty 50 TRI', 'HDFC NIFTY 50 ETF') down
+    to one group key, so ETFs tracking the same underlying index from
+    different AMCs group together regardless of whether the category is a
+    plain index name or a branded "<AMC> <Index> ETF" product title.
+    Deliberately keeps real product differences distinct (e.g. 'Nifty 50
+    Equal Weight' vs 'Nifty 50') since those aren't duplicates.
     """
-    prices = prices.sort_values(["symbol", "date"])
-    day_change = prices.groupby("symbol")["close"].pct_change()
-    bad_ticks = prices[day_change.abs() > BAD_TICK_THRESHOLD].copy()
-    if not bad_ticks.empty:
+    s = re.sub(r"[^a-z0-9]", "", category.lower())
+    for prefix in _PROVIDER_PREFIXES:
+        if s.startswith(prefix) and len(s) > len(prefix):
+            s = s[len(prefix):]
+            break
+    changed = True
+    while changed:
+        changed = False
+        for suf in _CATEGORY_SUFFIXES:
+            if s.endswith(suf) and len(s) > len(suf):
+                s = s[: -len(suf)]
+                changed = True
+    return s
+
+
+def get_representative_symbols(lookback_days: int = 90) -> pd.DataFrame:
+    """One ETF per underlying-index group (see _normalize_category), keeping
+    the highest-average-volume symbol in each group as the "representative" -
+    tracking every near-duplicate ETF from every AMC adds clutter, not
+    diversification, for strategies that trade individual instruments.
+
+    Returns all symbols with a `group_key` and `is_representative` flag (not
+    just the winners), so callers/UIs can show what got folded into what.
+    """
+    meta = read_meta()
+    prices = read_daily_prices()
+    if meta.empty:
+        return pd.DataFrame(columns=["symbol", "category", "group_key", "avg_volume", "is_representative"])
+
+    if prices.empty:
+        avg_vol = pd.Series(dtype=float, name="avg_volume")
+    else:
+        cutoff = prices["date"].max() - pd.Timedelta(days=lookback_days)
+        recent = prices[prices["date"] >= cutoff]
+        avg_vol = recent.groupby("symbol")["volume"].mean().rename("avg_volume")
+
+    df = meta.merge(avg_vol, on="symbol", how="left")
+    df["avg_volume"] = df["avg_volume"].fillna(0)
+    df["group_key"] = df["category"].apply(_normalize_category)
+    df = df.sort_values("avg_volume", ascending=False)
+    df["is_representative"] = ~df.duplicated("group_key", keep="first")
+    return df.sort_values(["group_key", "avg_volume"], ascending=[True, False]).reset_index(drop=True)
+
+
+def get_representative_symbol_list(lookback_days: int = 90) -> list[str]:
+    df = get_representative_symbols(lookback_days)
+    return df[df["is_representative"]]["symbol"].tolist()
+
+
+INTRADAY_RANGE_THRESHOLD = 0.20  # same-day high/low more than this far from close = suspected bad print
+
+
+def drop_bad_ticks(prices: pd.DataFrame, max_passes: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Drop or repair suspected bad ticks - Yahoo Finance occasionally prints a
+    wrong value for one field on one day (e.g. a misplaced decimal), and a
+    single-day/single-field check can miss it if a neighboring day is also bad.
+
+    Two independent checks, both iterated to convergence:
+      1. Close: a day-over-day close move bigger than BAD_TICK_THRESHOLD is
+         essentially never real for an ETF. Whole row dropped (close/high/low/
+         volume all suspect once close itself is wrong).
+      2. High/Low: a same-day high/low more than INTRADAY_RANGE_THRESHOLD away
+         from that day's own close implies an intraday round-trip that's not
+         realistic for a diversified ETF. Only that one field is nulled out
+         (close/volume for the day are usually still fine), so this doesn't
+         lose otherwise-valid data - it just won't be used for touch-based
+         entry/exit checks on that specific day.
+
+    Returns (cleaned_prices, all_flagged_rows) - flagged rows include both
+    fully-dropped close anomalies and rows with a nulled high/low.
+    """
+    prices = prices.sort_values(["symbol", "date"]).copy()
+    all_bad = []
+    for _ in range(max_passes):
+        day_change = prices.groupby("symbol")["close"].pct_change()
+        bad_ticks = prices[day_change.abs() > BAD_TICK_THRESHOLD]
+        if bad_ticks.empty:
+            break
+        all_bad.append(bad_ticks.assign(bad_reason="close_jump"))
         prices = prices.drop(bad_ticks.index)
+
+    bad_low = prices[prices["low"] < prices["close"] * (1 - INTRADAY_RANGE_THRESHOLD)]
+    if not bad_low.empty:
+        all_bad.append(bad_low.assign(bad_reason="bad_low"))
+        prices.loc[bad_low.index, "low"] = np.nan
+
+    bad_high = prices[prices["high"] > prices["close"] * (1 + INTRADAY_RANGE_THRESHOLD)]
+    if not bad_high.empty:
+        all_bad.append(bad_high.assign(bad_reason="bad_high"))
+        prices.loc[bad_high.index, "high"] = np.nan
+
+    # open=0 shows up for many early (2008-2010) sessions on some symbols -
+    # a real Yahoo Finance data gap, not an actual free trade. Also catch an
+    # open implausibly far from that day's close, same logic as high/low.
+    if "open" in prices.columns:
+        bad_open = prices[
+            (prices["open"] <= 0)
+            | (prices["open"] < prices["close"] * (1 - INTRADAY_RANGE_THRESHOLD))
+            | (prices["open"] > prices["close"] * (1 + INTRADAY_RANGE_THRESHOLD))
+        ]
+        if not bad_open.empty:
+            all_bad.append(bad_open.assign(bad_reason="bad_open"))
+            prices.loc[bad_open.index, "open"] = np.nan
+
+    bad_ticks = pd.concat(all_bad) if all_bad else prices.iloc[0:0].assign(bad_reason=[])
     return prices, bad_ticks
 
 

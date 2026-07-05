@@ -37,26 +37,48 @@ class SectorReversalResult:
     week_keys: list = field(default_factory=list)
 
 
-def _sector_weekly_series(daily: pd.DataFrame, symbols: list[str]) -> pd.DataFrame | None:
-    sub = daily[daily["symbol"].isin(symbols)].copy()
+def sector_daily_index(prices: pd.DataFrame, symbols: list[str]) -> pd.DataFrame | None:
+    """Equal-weighted synthetic daily index for a sector's constituent ETFs.
+
+    Returns columns: date, index_close, index_high, volume.
+    index_high approximates the sector's day-high each day (average of each
+    constituent's day-high vs. its own prior close) - used to detect a price
+    "touch" of a target during a day, not just the closing level. Day-high is
+    max(open, close), not the raw intraday high - a fleeting intraday tick
+    isn't reliably tradable, but the open and close are real, settled prices.
+    Shared by the live sector-reversal screen and the backtest engine.
+    """
+    sub = prices[prices["symbol"].isin(symbols)].copy()
     if sub.empty:
         return None
     sub = sub.sort_values(["symbol", "date"])
-    sub["ret"] = sub.groupby("symbol")["close"].pct_change()
+    sub["day_high"] = sub[["open", "close"]].max(axis=1)
+    sub["prev_close"] = sub.groupby("symbol")["close"].shift(1)
+    sub["ret"] = sub["close"] / sub["prev_close"] - 1
+    sub["high_ret"] = sub["day_high"] / sub["prev_close"] - 1
 
     per_day = (
         sub.groupby("date")
-        .agg(avg_ret=("ret", "mean"), volume=("volume", "sum"))
+        .agg(avg_ret=("ret", "mean"), avg_high_ret=("high_ret", "mean"), volume=("volume", "sum"))
         .reset_index()
         .sort_values("date")
+        .reset_index(drop=True)
     )
     per_day["avg_ret"] = per_day["avg_ret"].fillna(0)
-    per_day["index_value"] = 100 * (1 + per_day["avg_ret"]).cumprod()
+    per_day["index_close"] = 100 * (1 + per_day["avg_ret"]).cumprod()
+    prev_index = per_day["index_close"].shift(1).fillna(100.0)
+    per_day["index_high"] = prev_index * (1 + per_day["avg_high_ret"].fillna(per_day["avg_ret"]))
+    return per_day[["date", "index_close", "index_high", "volume"]]
 
+
+def _sector_weekly_series(prices: pd.DataFrame, symbols: list[str]) -> pd.DataFrame | None:
+    per_day = sector_daily_index(prices, symbols)
+    if per_day is None:
+        return None
     per_day = base.add_week_key(per_day)
     weekly = (
         per_day.groupby("week_key")
-        .agg(week_close=("index_value", "last"), week_volume=("volume", "sum"), last_date=("date", "max"))
+        .agg(week_close=("index_close", "last"), week_volume=("volume", "sum"), last_date=("date", "max"))
         .reset_index()
         .sort_values("last_date")
     )
