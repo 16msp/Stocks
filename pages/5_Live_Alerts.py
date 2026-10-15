@@ -12,6 +12,10 @@ from strategies.sector_reversal_backtest import DEFAULT_HORIZON_DAYS, DEFAULT_WE
 
 st.set_page_config(page_title="Live Alerts", page_icon="🔔", layout="wide")
 
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+
 st.title("🔔 Live Sector Reversal Tracker")
 st.caption(
     "Paper-trades the reversal rule in real time, on every sector - including the ones too "

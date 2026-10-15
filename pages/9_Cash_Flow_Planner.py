@@ -14,6 +14,10 @@ from strategies import nse_etf_momentum as base  # noqa: E402
 
 st.set_page_config(page_title="Cash Flow Planner", page_icon="💰", layout="wide")
 
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+
 st.title("💰 Cash Flow Planner")
 st.caption(
     "Every backtested trade ties up ₹50,000 from entry until it resolves. Run enough ETFs at once and "

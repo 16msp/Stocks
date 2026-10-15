@@ -14,6 +14,10 @@ from strategies.sector_groups import SECTOR_GROUPS  # noqa: E402
 
 st.set_page_config(page_title="Sector Reversal Backtest", page_icon="\U0001F9EA", layout="wide")
 
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+
 st.title("\U0001F9EA Sector Reversal Backtest")
 st.caption(
     "Tests the reversal rule against years of real history: sector was down over the prior "

@@ -72,9 +72,12 @@ def _load_equity_list(refresh: bool = False) -> tuple[pd.DataFrame | None, str]:
         df = _download_equity_list()
     except Exception:
         return None, "NSE list unavailable"
-    CACHE_PATH.write_text(json.dumps({
-        "fetched": date.today().isoformat(), "columns": list(df.columns), "rows": df.values.tolist(),
-    }))
+    try:
+        CACHE_PATH.write_text(json.dumps({
+            "fetched": date.today().isoformat(), "columns": list(df.columns), "rows": df.values.tolist(),
+        }))
+    except OSError:  # read-only filesystem on some hosts - just skip caching
+        pass
     return df, f"NSE list fetched {date.today().isoformat()}"
 
 

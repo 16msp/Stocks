@@ -11,9 +11,18 @@ the sidebar navigation from that folder). To add a new strategy later:
      following the same pattern as pages/1_NSE_ETF_Weekly_Momentum.py.
 """
 
+import sys
+from pathlib import Path
+
 import streamlit as st
 
+sys.path.append(str(Path(__file__).resolve().parent))
+
 st.set_page_config(page_title="Stock Analysis", page_icon="📈", layout="wide")
+
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
 
 st.title("📈 Stock Analysis Dashboard")
 st.write(

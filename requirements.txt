@@ -6,3 +6,4 @@ streamlit
 plotly
 openpyxl
 scipy
+psycopg2-binary

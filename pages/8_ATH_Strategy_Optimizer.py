@@ -12,6 +12,10 @@ from strategies import nse_etf_momentum as base  # noqa: E402
 
 st.set_page_config(page_title="ATH Strategy Optimizer", page_icon="🧪", layout="wide")
 
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+
 st.title("🧪 Per-ETF Strategy Optimizer")
 st.caption(
     "The fixed ATH-Averaging rule (-20% entry, +25%/15% CAGR exit) is one-size-fits-all. This page "

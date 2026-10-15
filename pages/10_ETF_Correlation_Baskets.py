@@ -13,6 +13,10 @@ from strategies import nse_etf_momentum as base  # noqa: E402
 
 st.set_page_config(page_title="ETF Correlation Baskets", page_icon="🧺", layout="wide")
 
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+
 st.title("🧺 ETF Correlation Baskets")
 st.caption(
     "Many ETFs in the universe move together - trading all of them isn't diversification, it's the "
