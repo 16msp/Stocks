@@ -33,6 +33,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from strategies import price_store
+
 CHUNK_SIZE = 50
 GOOGLE_SHEET_ID_RE = re.compile(r"docs\.google\.com/spreadsheets/d/([a-zA-Z0-9-_]+)")
 
@@ -179,7 +181,9 @@ def _window_return(close: pd.Series, days: int) -> float:
     return float(close.iloc[-1] / base.iloc[-1] - 1.0)
 
 
-TECH_COLUMNS = ["52W High Drop", "vs 200DMA", "Vol Trend", "Up/Down Vol", "VP Low (VAL)", "VP POC", "VP High (VAH)", "Overhead Supply", "Supply to +25%"]
+TECH_COLUMNS = ["52W High Drop", "vs 200DMA", "Vol Trend", "Up/Down Vol", "VP Low (VAL)", "VP POC", "VP High (VAH)", "Overhead Supply", "Supply to +25%",
+                "RSI 14", "Days Since Low", "Volatility Ratio", "Off 52W Low"]
+MARKET_EXTRA_COLUMNS = ["Last Close", "Avg Value 20D"]  # Avg Value 20D = avg daily traded value, Rs crore
 VP_BINS = 40
 VP_VALUE_AREA = 0.70
 VP_LOOKBACK = 126  # ~6 months of sessions
@@ -234,12 +238,14 @@ def volume_profile(df: pd.DataFrame, ref_price: float | None = None, band_pct: f
 
 def _technicals(hist: pd.DataFrame) -> dict:
     """Technical attributes from ~14 months of daily OHLCV for one stock."""
-    out = {c: np.nan for c in TECH_COLUMNS}
+    out = {c: np.nan for c in TECH_COLUMNS + MARKET_EXTRA_COLUMNS}
     hist = hist.dropna(subset=["Close"])
     if len(hist) < 30:
         return out
     close, vol = hist["Close"], hist["Volume"]
     last = float(close.iloc[-1])
+    out["Last Close"] = last
+    out["Avg Value 20D"] = float((close.iloc[-20:] * vol.iloc[-20:]).mean() / 1e7)
 
     year = hist.loc[hist.index >= hist.index[-1] - pd.Timedelta(days=365)]
     high_52w = float(year["Close"].max())
@@ -248,6 +254,28 @@ def _technicals(hist: pd.DataFrame) -> dict:
         out["vs 200DMA"] = last / float(close.iloc[-200:].mean()) - 1.0
     if len(vol) >= 90 and vol.iloc[-90:].mean() > 0:
         out["Vol Trend"] = float(vol.iloc[-20:].mean() / vol.iloc[-90:].mean())
+
+    # Stabilisation: how long since the 52W closing low, and how far off it we are.
+    low_pos = int(np.argmin(year["Close"].to_numpy()))
+    out["Days Since Low"] = float(len(year) - 1 - low_pos)
+    out["Off 52W Low"] = last / float(year["Close"].min()) - 1.0
+
+    # RSI(14), Wilder smoothing.
+    delta = close.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+    if loss.iloc[-1] > 0:
+        out["RSI 14"] = float(100 - 100 / (1 + gain.iloc[-1] / loss.iloc[-1]))
+    elif gain.iloc[-1] > 0:
+        out["RSI 14"] = 100.0
+
+    # Volatility contraction: avg true range (as % of price) last 20 sessions vs last 100.
+    if len(hist) >= 101:
+        prev = close.shift(1)
+        tr = pd.concat([hist["High"] - hist["Low"], (hist["High"] - prev).abs(), (hist["Low"] - prev).abs()], axis=1).max(axis=1)
+        tr_pct = (tr / close).dropna()
+        if tr_pct.iloc[-100:].mean() > 0:
+            out["Volatility Ratio"] = float(tr_pct.iloc[-20:].mean() / tr_pct.iloc[-100:].mean())
 
     recent = hist.iloc[-60:]
     chg = recent["Close"].diff()
@@ -264,59 +292,43 @@ def _technicals(hist: pd.DataFrame) -> dict:
     return out
 
 
-def fetch_market_stats(symbols: list[str], chunk_size: int = CHUNK_SIZE) -> pd.DataFrame:
-    """Per-symbol market stats from ~14 months of Yahoo daily bars (NSE ".NS").
+def fetch_market_stats(symbols: list[str], force: bool = False) -> pd.DataFrame:
+    """Per-symbol market stats computed from the local daily-price store
+    (strategies/price_store.py), which is topped up with only the sessions that
+    are new since the last run.
 
     - RS 1M/3M: relative strength vs Nifty 50 = stock return minus Nifty
       return over the window (return fractions; positive = beating Nifty).
     - 52W High Drop, vs 200DMA, Vol Trend (20d vs 90d avg volume), Up/Down Vol
-      (volume on up days / down days, last 60 sessions).
+      (volume on up days / down days, last 60 sessions), RSI, stabilisation and
+      volatility fields - see _technicals.
     - Volume profile (VAL / POC / VAH, overhead supply) over the last ~6 months.
 
-    Uses last completed daily closes. Unresolved symbols or insufficient
-    history give NaN for the affected fields.
+    Uses last completed daily bars. Unresolved symbols or insufficient history
+    give NaN for the affected fields. `force` re-checks Yahoo even if the store
+    looks current.
     """
     uniq = sorted({s for s in symbols if isinstance(s, str) and s})
-    out = pd.DataFrame(index=pd.Index(uniq, name="Stock"), columns=RS_COLUMNS + TECH_COLUMNS, dtype=float)
+    out = pd.DataFrame(index=pd.Index(uniq, name="Stock"), columns=RS_COLUMNS + TECH_COLUMNS + MARKET_EXTRA_COLUMNS, dtype=float)
     if not uniq:
         return out
 
-    nifty_ret = {w: np.nan for w in RS_WINDOWS}
-    try:
-        nifty = yf.download(NIFTY_TICKER, period="14mo", interval="1d", progress=False, auto_adjust=False)["Close"]
-        nifty = nifty.squeeze().dropna()
-        if not nifty.empty:
-            nifty_ret = {w: _window_return(nifty, d) for w, d in RS_WINDOWS.items()}
-    except Exception:
-        pass
+    price_store.update_prices(uniq + [NIFTY_TICKER], force=force)
+    history = price_store.load_history(uniq + [NIFTY_TICKER])
 
-    for i in range(0, len(uniq), chunk_size):
-        chunk = uniq[i:i + chunk_size]
-        yahoo_symbols = [f"{s}.NS" for s in chunk]
-        try:
-            data = yf.download(
-                yahoo_symbols, period="14mo", interval="1d",
-                group_by="ticker", threads=True, progress=False, auto_adjust=False,
-            )
-        except Exception:
+    nifty_ret = {w: np.nan for w in RS_WINDOWS}
+    if NIFTY_TICKER in history:
+        nifty_close = history[NIFTY_TICKER]["Close"].dropna()
+        nifty_ret = {w: _window_return(nifty_close, d) for w, d in RS_WINDOWS.items()}
+
+    for sym in uniq:
+        hist = history.get(sym)
+        if hist is None or hist.empty:
             continue
-        if data is None or data.empty:
-            continue
-        for sym, ysym in zip(chunk, yahoo_symbols):
-            try:
-                hist = data if len(chunk) == 1 else data[ysym]
-                hist = hist[["Close", "High", "Low", "Volume"]]
-                if isinstance(hist.columns, pd.MultiIndex):
-                    hist = hist.droplevel(-1, axis=1)
-                hist = hist.dropna(subset=["Close"])
-            except (KeyError, TypeError):
-                continue
-            if hist.empty:
-                continue
-            for w, d in RS_WINDOWS.items():
-                out.loc[sym, f"RS {w}"] = _window_return(hist["Close"], d) - nifty_ret[w]
-            for k, v in _technicals(hist).items():
-                out.loc[sym, k] = v
+        for w, d in RS_WINDOWS.items():
+            out.loc[sym, f"RS {w}"] = _window_return(hist["Close"], d) - nifty_ret[w]
+        for k, v in _technicals(hist).items():
+            out.loc[sym, k] = v
     return out
 
 
@@ -514,6 +526,36 @@ def compute_stock_summary(lots: pd.DataFrame, sizing: SizingRules, capital_base:
     return result.sort_values(["_order", "Gain %"], ascending=[True, False]).drop(columns="_order").reset_index(drop=True)
 
 
+def _scale(x, lo, hi) -> float:
+    """Linear 0..1 between lo (0) and hi (1), clipped; NaN -> 0 (no evidence = no credit)."""
+    if x is None or pd.isna(x):
+        return 0.0
+    return float(np.clip((x - lo) / (hi - lo), 0.0, 1.0))
+
+
+BUY_SCORE_WEIGHTS = {
+    "Stabilisation": 25,   # no fresh low for 30+ sessions (a falling stock isn't a base yet)
+    "Accumulation": 25,    # volume on up-days beating down-days
+    "Calm": 15,            # volatility contracting (tightening base)
+    "Strength": 15,        # beating Nifty over 3M
+    "Clear path": 20,      # little supply between CMP and +25%
+}
+
+
+def buy_score(row: pd.Series) -> float:
+    """0-100 timing score for *when* to add to a stock you already decided is cheap
+    enough. Built to mirror the base-building framework (decline -> stabilise ->
+    accumulate -> breakout), since there is no stop-loss to bail out a falling knife."""
+    parts = {
+        "Stabilisation": _scale(row.get("Days Since Low"), 5, 30),
+        "Accumulation": _scale(row.get("Up/Down Vol"), 0.8, 1.5),
+        "Calm": _scale(row.get("Volatility Ratio"), 1.2, 0.6),
+        "Strength": _scale(row.get("RS 3M"), -0.10, 0.10),
+        "Clear path": _scale(row.get("Supply to +25%"), 0.80, 0.40),
+    }
+    return float(sum(BUY_SCORE_WEIGHTS[k] * v for k, v in parts.items()))
+
+
 def _vp_zone(row: pd.Series) -> str:
     cmp, val, poc, vah = row["CMP"], row["VP Low (VAL)"], row["VP POC"], row["VP High (VAH)"]
     if any(pd.isna(x) for x in (cmp, val, poc, vah)):
@@ -552,13 +594,25 @@ def analyze(
         if "VP POC" in stocks:
             stocks["vs POC"] = stocks["CMP"] / stocks["VP POC"] - 1.0
             stocks["VP Zone"] = stocks.apply(_vp_zone, axis=1)
+        stocks["Buy Score"] = stocks.apply(buy_score, axis=1)
     exits = build_exit_table(lots)
     add_candidates = compute_add_candidates(lots, sizing_rules, base)
     if "RS 3M" in stocks:
-        rs3 = stocks.set_index("Stock")["RS 3M"]
-        for table in (exits, add_candidates):
-            if not table.empty:
-                table["RS 3M"] = table["Stock"].map(rs3)
+        by_stock = stocks.set_index("Stock")
+        if not exits.empty:
+            exits["RS 3M"] = exits["Stock"].map(by_stock["RS 3M"])
+        if not add_candidates.empty:
+            for col in ["Buy Score", "Up/Down Vol", "Days Since Low", "Volatility Ratio", "RSI 14",
+                        "Supply to +25%", "VP Zone", "RS 3M"]:
+                if col in by_stock:
+                    add_candidates[col] = add_candidates["Stock"].map(by_stock[col])
+            # Rank within each status band by timing score, then flag the top 3 actionable names.
+            order = {"Ready": 0, "Nearing": 1, "Blocked": 2}
+            add_candidates["_o"] = add_candidates["Add Status"].map(order)
+            add_candidates = add_candidates.sort_values(["_o", "Buy Score"], ascending=[True, False]).drop(columns="_o").reset_index(drop=True)
+            actionable = add_candidates["Add Status"] != "Blocked"
+            add_candidates["Pick"] = ""
+            add_candidates.loc[add_candidates.index[actionable][:3], "Pick"] = "⭐ Top 3"
 
     live_count = int((lots["CMP Source"] == "live").sum())
     fallback = sorted(lots.loc[lots["CMP Source"] == "sheet", "Stock"].unique().tolist())

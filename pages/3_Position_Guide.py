@@ -8,6 +8,7 @@ import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from strategies import position_guide as strategy  # noqa: E402
+from strategies.holdings_style import style_holdings  # noqa: E402
 
 st.set_page_config(page_title="Position Guide", page_icon="🧭", layout="wide")
 
@@ -28,59 +29,6 @@ ADD_STATUS_COLORS = {
 }
 
 
-GOOD = "background-color: #c6efce; color: #006100"
-BAD = "background-color: #ffc7ce; color: #9c0006"
-MID = "background-color: #ffeb9c; color: #9c6500"
-
-
-def _rate(value, good, bad, higher_is_better=True):
-    """GOOD/BAD/MID style for a number against two cut-offs (blank if missing)."""
-    if value is None or pd.isna(value):
-        return ""
-    if not higher_is_better:
-        value, good, bad = -value, -good, -bad
-    if value >= good:
-        return GOOD
-    if value <= bad:
-        return BAD
-    return MID
-
-
-def _vp_zone_style(row):
-    """Zone is only 'good' when volume confirms it (see the how-to-read box)."""
-    zone, ud, vt = row.get("VP Zone", ""), row.get("Up/Down Vol"), row.get("Vol Trend")
-    if zone == "Below value area":
-        if pd.isna(ud):
-            return ""
-        return GOOD if ud >= 1.2 else (BAD if ud < 0.8 else MID)
-    if zone == "Above value area":
-        if pd.isna(vt):
-            return ""
-        return GOOD if vt >= 1.0 else MID
-    return ""
-
-
-def style_holdings(df: pd.DataFrame):
-    """Green = favours the stock, red = works against it, amber = in between."""
-    rules = {
-        "RS 1M": lambda v: _rate(v, 0.02, -0.02),
-        "RS 3M": lambda v: _rate(v, 0.02, -0.02),
-        "vs 200DMA": lambda v: _rate(v, 0.0, -0.10),
-        "Vol Trend": lambda v: _rate(v, 1.2, 0.7),
-        "Up/Down Vol": lambda v: _rate(v, 1.2, 0.8),
-        "Overhead Supply": lambda v: _rate(v, 0.30, 0.70, higher_is_better=False),
-        "Supply to +25%": lambda v: _rate(v, 0.40, 0.70, higher_is_better=False),
-    }
-    styler = df.style
-    for col, fn in rules.items():
-        if col in df:
-            styler = styler.map(lambda v, fn=fn: fn(v), subset=[col])
-    if "VP Zone" in df:
-        zone_styles = df.apply(_vp_zone_style, axis=1)
-        styler = styler.apply(lambda col: zone_styles, subset=["VP Zone"])
-    return styler
-
-
 def _color_by_add_status(row):
     style = ADD_STATUS_COLORS.get(row["Add Status"], "")
     return [style] * len(row)
@@ -92,8 +40,8 @@ def _cached_live_prices(symbols: tuple) -> dict:
 
 
 @st.cache_data(ttl=3600, show_spinner="Fetching price history for RS & technicals...")
-def _cached_market_stats(symbols: tuple):
-    return strategy.fetch_market_stats(list(symbols))
+def _cached_market_stats(symbols: tuple, force: bool):
+    return strategy.fetch_market_stats(list(symbols), force=force)
 
 
 @st.cache_data(ttl=300, show_spinner="Loading positions from Google Sheet...")
@@ -148,7 +96,7 @@ if uploaded is None and strategy.is_google_sheet_url(path_input):
     )
 
 live_prices = _cached_live_prices(tuple(sorted(raw["Stock"].dropna().unique()))) if use_live and not raw.empty else {}
-rs_table = _cached_market_stats(tuple(sorted(raw["Stock"].dropna().unique()))) if use_rs and not raw.empty else None
+rs_table = _cached_market_stats(tuple(sorted(raw["Stock"].dropna().unique())), bool(refresh_clicked)) if use_rs and not raw.empty else None
 
 exit_rules = strategy.ExitRules(
     short_term_years=short_term_years, short_term_gain=short_term_gain,
@@ -206,13 +154,31 @@ st.caption(
     "**Vol Trend** = 20-day avg volume / 90-day avg (>1x = interest rising). "
     "**Up/Down Vol** = volume on up-days / down-days, last 60 sessions (>1x = buyers dominate). "
     "**Volume profile** is built from the last ~6 months: POC = price with the most volume, VAL-VAH = zone holding 70% of it, "
-    "**VP Zone** = where CMP sits, **Overhead Supply** = share of that volume traded above CMP (trapped holders who may sell into a recovery), **Supply to +25%** = share of that volume traded between CMP and 25% above it (the supply standing between you and a +25% exit). "
+    "**Buy Score** (0-100, see the guide below) ranks *when* to add. **Days Since Low** = sessions since the 52W low, **Volatility Ratio** = recent vs 100-day average daily range, **RSI 14**, **Off 52W Low** = bounce from the low. **VP Zone** = where CMP sits, **Overhead Supply** = share of that volume traded above CMP (trapped holders who may sell into a recovery), **Supply to +25%** = share of that volume traded between CMP and 25% above it (the supply standing between you and a +25% exit). "
     "**Colours:** 🟩 favours the stock, 🟥 works against it, 🟨 in between - RS beating/lagging Nifty by 2 pts, price above/10% below the 200DMA, "
     "Vol Trend ≥1.2x / <0.7x, Up/Down Vol ≥1.2x / <0.8x, Overhead Supply ≤30% / ≥70%, Supply to +25% ≤40% / ≥70%, "
     "VP Zone green only when volume confirms (below value area with Up/Down ≥1.2x = accumulation; above VAH with rising volume). "
-    "52W High Drop and vs POC are left uncoloured - they are levels, not good/bad signals. "
+    "Days Since Low ≥25 / <10, Volatility Ratio ≤0.85x / ≥1.15x, Buy Score ≥65 / <40. "
+    "52W High Drop, RSI 14, Off 52W Low and vs POC are left uncoloured - they are levels, not good/bad signals. "
     "Based on last completed daily bars; blank = not enough history."
 )
+with st.expander("Choosing 2-3 from the Add More list: Buy Score"):
+    st.markdown(
+        """
+"Add More" tells you a stock is **cheap enough** (down 17%+ from every buy). It doesn't tell you it has **stopped falling**. With no stop-loss, adding to a stock that is still sliding is the costly mistake, so the **Buy Score (0-100)** ranks *timing*:
+
+| Part | Pts | Full marks when | Why |
+|---|---:|---|---|
+| **Stabilisation** | 25 | no new 52W low for 30+ sessions (0 at 5) | A base needs time; fresh lows mean sellers are still in charge |
+| **Accumulation** | 25 | Up/Down Vol 1.5x+ (0 at 0.8x) | Volume on up-days beating down-days = buyers absorbing supply |
+| **Calm** | 15 | Volatility Ratio 0.6x or less (0 at 1.2x) | Tightening range = selling exhausted |
+| **Strength** | 15 | RS 3M +10 pts vs Nifty or more (0 at -10) | Leaders recover first |
+| **Clear path** | 20 | Supply to +25% 40% or less (0 at 80%) | Little overhead selling between you and your target |
+
+In the Add More table the stocks are sorted Ready → Nearing → Blocked and by Buy Score inside each band, and the top 3 actionable ones (not Blocked) are flagged ⭐. **Rule of thumb:** buy only from the ⭐ names scoring **65+**; if none do, waiting is a valid choice - a cheap stock with a score under 40 is usually a falling knife. RSI 14 and Off 52W Low are context, not scored (RSI under 30 = oversold, but oversold can stay oversold).
+        """
+    )
+
 with st.expander("How to read the volume profile (what to do with it)"):
     st.markdown(
         """
@@ -237,7 +203,7 @@ Limits: built from daily high/low/volume (each day's volume spread evenly over i
 if use_rs and "RS 3M" not in stocks:
     st.warning("Market data (RS / technicals) could not be fetched right now - try Refresh.")
 
-analysis_cols = strategy.RS_COLUMNS + strategy.TECH_COLUMNS + ["vs POC", "VP Zone"]
+analysis_cols = ["Buy Score"] + strategy.RS_COLUMNS + strategy.TECH_COLUMNS + ["vs POC", "VP Zone"]
 vp_hidden = {"VP Low (VAL)", "VP POC", "VP High (VAH)"}
 holdings_cols = ["Stock"] + [c for c in analysis_cols if c in stocks.columns and c not in vp_hidden]
 st.dataframe(
@@ -250,6 +216,11 @@ st.dataframe(
         "vs POC": st.column_config.NumberColumn(format="percent"),
         "Overhead Supply": st.column_config.NumberColumn(format="percent"),
         "Supply to +25%": st.column_config.NumberColumn(format="percent"),
+        "Buy Score": st.column_config.NumberColumn(format="%.0f", help="0-100 timing score: stabilisation 25 + accumulation 25 + calm 15 + strength 15 + clear path 20"),
+        "RSI 14": st.column_config.NumberColumn(format="%.0f"),
+        "Days Since Low": st.column_config.NumberColumn(format="%.0f", help="Sessions since the 52-week closing low"),
+        "Volatility Ratio": st.column_config.NumberColumn(format="%.2fx", help="Avg true range % of last 20 sessions / last 100 (<1 = tightening)"),
+        "Off 52W Low": st.column_config.NumberColumn(format="percent"),
         **RS_CONFIG,
     },
     hide_index=True, width="stretch",
@@ -302,9 +273,21 @@ st.caption(
 if add_candidates.empty:
     st.write("No stocks currently have tranches available to add.")
 else:
+    add_cols = ["Pick", "Stock", "Add Status", "Buy Score", "Down %", "Up/Down Vol", "Days Since Low",
+                "Volatility Ratio", "Supply to +25%", "RS 3M", "RSI 14", "VP Zone"]
+    add_cols = [c for c in add_cols if c in add_candidates.columns] + [
+        c for c in add_candidates.columns if c not in add_cols and c != "Pick"
+    ]
+    add_candidates = add_candidates[add_cols]
     st.dataframe(
         add_candidates.style.apply(_color_by_add_status, axis=1),
         column_config={
+            "Buy Score": st.column_config.NumberColumn(format="%.0f"),
+            "Up/Down Vol": st.column_config.NumberColumn(format="%.2fx"),
+            "Days Since Low": st.column_config.NumberColumn(format="%.0f"),
+            "Volatility Ratio": st.column_config.NumberColumn(format="%.2fx"),
+            "Supply to +25%": st.column_config.NumberColumn(format="percent"),
+            "RSI 14": st.column_config.NumberColumn(format="%.0f"),
             "Allocation %": st.column_config.NumberColumn(format="percent"),
             "Last Buy Price": st.column_config.NumberColumn(format="%.2f"),
             "CMP": st.column_config.NumberColumn(format="%.2f"),
