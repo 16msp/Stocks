@@ -1,5 +1,5 @@
 """
-Stock Analysis - local dashboard home page.
+Stock Analysis - dashboard home page.
 
 Run with:  streamlit run app.py
 
@@ -25,33 +25,17 @@ from strategies.auth_gate import require_password  # noqa: E402
 require_password()
 
 st.title("📈 Stock Analysis Dashboard")
-st.write(
-    "Local dashboard for running stock/ETF strategies and viewing results. "
-    "Pick a strategy from the sidebar."
-)
+st.write("Technical analysis for NSE stocks. Pick a page from the sidebar.")
 
-st.subheader("Available strategies")
+st.subheader("Pages")
 st.markdown(
-    "- **NSE ETF Weekly Momentum** - tracks weekly volume + price trend for all "
-    "NSE-listed ETFs and flags short-term momentum candidates.\n"
-    "- **Sector Reversal** - flags NSE sectors that were falling and just turned positive.\n"
-    "- **Position Guide** - reads your open positions workbook and flags each lot/stock "
-    "as Hold, Add More, or Exit based on your sizing and exit rules.\n"
-    "- **Backtest** - tests the Sector Reversal rule against years of real NSE history "
-    "before you risk money on it.\n"
-    "- **Live Alerts** - paper-trades Sector Reversal signals in real time and tells you "
-    "when to sell (target hit or time exit).\n"
-    "- **ATH Averaging Backtest** - tests a buy-the-dip-and-average rule (-20% from ATH, "
-    "average down twice more, exit at +25%/<1yr or 15% CAGR/>=1yr) across every NSE ETF.\n"
-    "- **ATH Averaging Live** - paper-trades that same rule in real time across the whole "
-    "ETF universe and alerts you when to sell.\n"
-    "- **ATH Strategy Optimizer** - finds each ETF's own best entry-depth/exit-target combination "
-    "from its own history, instead of one fixed rule for everything.\n"
-    "- **Cash Flow Planner** - shows how many trades overlap and how much capital that ties up, "
-    "plus a simulator for whether your real starting capital + monthly infusion could keep up.\n"
-    "- **ETF Correlation Baskets** - groups correlated ETFs into baskets and compares trading "
-    "everything vs. one representative per basket, under the same limited capital.\n"
-    "\nMore strategies will show up here as they're added."
+    "- **Position Guide** - reads your open positions sheet and, for each stock you own, shows relative "
+    "strength vs Nifty, stabilisation, accumulation, volume-profile and supply indicators with a Buy Score. "
+    "Also lists tranches to exit and stocks you could add to, ranked by timing.\n"
+    "- **Sector Scanner** - pulls every NSE-listed stock in a sector (Small Finance Banks first), runs the same "
+    "checks and gives each a recommendation: Accumulate, Strong - wait for dip, Watch, or Avoid. "
+    "More sectors get added once each is frozen.\n"
+    "\nTechnicals only - check fundamentals before buying. Not investment advice."
 )
 
-st.info("Select a strategy in the sidebar to get started.", icon="👈")
+st.info("Select a page in the sidebar to get started.", icon="👈")
