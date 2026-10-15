@@ -11,6 +11,10 @@ from strategies import nse_etf_momentum as base  # noqa: E402
 
 st.set_page_config(page_title="ATH Averaging Live", page_icon="🔔", layout="wide")
 
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+
 st.title("🔔 ATH-Drop Averaging - Live Tracker")
 st.caption(
     "Paper-trades the ATH-drop averaging rule in real time across a deduplicated, filtered NSE ETF "

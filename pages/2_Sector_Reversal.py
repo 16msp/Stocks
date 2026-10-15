@@ -14,6 +14,10 @@ from strategies.sector_groups import SECTOR_GROUPS  # noqa: E402
 
 st.set_page_config(page_title="Sector ETF Reversal", page_icon="🔄", layout="wide")
 
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+
 st.title("🔄 Sector ETF Reversal Screen")
 st.caption(
     "Combines same-sector ETFs from different AMCs into one equal-weighted sector index "

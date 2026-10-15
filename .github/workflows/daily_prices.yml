@@ -1,0 +1,22 @@
+name: Daily price update
+
+on:
+  schedule:
+    - cron: "30 11 * * 1-5"   # 17:00 IST, Mon-Fri, after the NSE close
+  workflow_dispatch:           # "Run workflow" button on the Actions tab
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python scripts/update_prices.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          POSITIONS_SHEET_URL: ${{ secrets.POSITIONS_SHEET_URL }}

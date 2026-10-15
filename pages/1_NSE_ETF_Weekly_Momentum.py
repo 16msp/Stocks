@@ -13,6 +13,10 @@ from strategies import nse_etf_momentum as strategy  # noqa: E402
 
 st.set_page_config(page_title="NSE ETF Weekly Momentum", page_icon="📊", layout="wide")
 
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+
 SIGNAL_COLORS = {
     "BULLISH": "#2ecc71",
     "CAUTION": "#e74c3c",

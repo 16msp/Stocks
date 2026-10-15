@@ -8,9 +8,14 @@ import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from strategies import position_guide as strategy  # noqa: E402
+from strategies.config import get_setting  # noqa: E402
 from strategies.holdings_style import style_holdings  # noqa: E402
 
 st.set_page_config(page_title="Position Guide", page_icon="🧭", layout="wide")
+
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
 
 st.title("🧭 Position Guide")
 st.caption(
@@ -20,7 +25,7 @@ st.caption(
     "execute yourself - this just shows where each name stands against it. Not investment advice."
 )
 
-DEFAULT_SOURCE = "https://docs.google.com/spreadsheets/d/1pl4T2Avhm4Ks39rQS3ocIkpeQ2RCyTeIzaCP_q9jyWw/edit?usp=sharing"
+DEFAULT_SOURCE = get_setting("POSITIONS_SHEET_URL", "")  # kept out of the code: set in .streamlit/secrets.toml or env
 
 ADD_STATUS_COLORS = {
     "Ready": "background-color: #c6efce; color: #006100",
@@ -82,6 +87,10 @@ if refresh_clicked:
     _cached_live_prices.clear()
     _cached_positions.clear()
     _cached_market_stats.clear()
+
+if not path_input and uploaded is None:
+    st.info("Add your Open Positions sheet: paste its Google Sheet URL in the sidebar, upload a copy, or set POSITIONS_SHEET_URL in .streamlit/secrets.toml.")
+    st.stop()
 
 try:
     raw = strategy.load_open_positions(uploaded) if uploaded is not None else _cached_positions(path_input)

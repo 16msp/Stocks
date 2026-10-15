@@ -9,10 +9,15 @@ import streamlit as st
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from strategies import position_guide as pg  # noqa: E402
 from strategies import price_store  # noqa: E402
+from strategies.config import get_setting  # noqa: E402
 from strategies import sector_scanner as scanner  # noqa: E402
 from strategies.holdings_style import BAD, GOOD, MID, style_holdings  # noqa: E402
 
 st.set_page_config(page_title="Sector Scanner", page_icon="🔭", layout="wide")
+
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
 st.title("🔭 Sector Scanner")
 st.caption(
     "Pulls every NSE-listed stock in a sector, runs the same technical checks as the Position Guide "
@@ -21,7 +26,7 @@ st.caption(
     "fundamentals before buying. Not investment advice."
 )
 
-DEFAULT_SHEET = "https://docs.google.com/spreadsheets/d/1pl4T2Avhm4Ks39rQS3ocIkpeQ2RCyTeIzaCP_q9jyWw/edit?usp=sharing"
+DEFAULT_SHEET = get_setting("POSITIONS_SHEET_URL", "")
 
 REC_STYLES = {
     "Accumulate": GOOD,
@@ -61,7 +66,7 @@ nonce = st.session_state.scan_nonce
 universe, universe_source = _cached_universe(sector, nonce)
 stats = _cached_stats(tuple(sorted(universe["Stock"])), nonce)
 try:
-    owned = _cached_owned(DEFAULT_SHEET)
+    owned = _cached_owned(DEFAULT_SHEET) if DEFAULT_SHEET else set()
 except Exception:
     owned = set()
 
@@ -75,7 +80,7 @@ st.success(f"{result.message} ({universe_source})")
 store = price_store.get_status(list(universe["Stock"]))
 if store:
     st.caption(
-        f"💾 Prices are stored locally ({store['rows']:,} daily bars for {store['symbols']} stocks, latest session "
+        f"💾 Prices stored in {store['backend']} ({store['rows']:,} daily bars for {store['symbols']} stocks, latest session "
         f"{store['latest_session']}). Each run downloads only sessions newer than that and recalculates everything; "
         "🔄 Refresh forces a Yahoo re-check."
     )

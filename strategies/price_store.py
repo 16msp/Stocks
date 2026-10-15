@@ -1,5 +1,7 @@
 """
-Local daily-price store for stocks (SQLite, same file as the ETF data).
+Daily-price store for stocks. SQLite file locally (same file as the ETF data), or
+Postgres (e.g. Supabase) when a DATABASE_URL setting exists - that is how the hosted
+app and the daily GitHub Actions job share one set of prices.
 
 Everything the Position Guide and Sector Scanner compute (RS, volume profile,
 Buy Score, ...) is derived from this store, so a daily rerun only downloads the
@@ -21,12 +23,15 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from strategies.nse_etf_momentum import DB_PATH
+from strategies.config import get_setting
+
+DB_PATH = Path(__file__).resolve().parent.parent / "nse_etf_data.db"
 
 CHUNK_SIZE = 50
 FULL_HISTORY_DAYS = 460
@@ -38,29 +43,79 @@ IST = timezone(timedelta(hours=5, minutes=30))
 INTRADAY_RANGE_THRESHOLD = 0.35  # high/low this far from the day's close = bad print, ignored
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS stock_prices (
-            symbol TEXT NOT NULL,
-            date TEXT NOT NULL,
-            open REAL, high REAL, low REAL, close REAL, volume REAL,
-            PRIMARY KEY (symbol, date)
+class _Db:
+    """Tiny wrapper so the store code is written once for SQLite and Postgres.
+    SQL is written with `?` placeholders; they become `%s` for Postgres."""
+
+    def __init__(self):
+        url = get_setting("DATABASE_URL")
+        self.is_pg = bool(url)
+        if self.is_pg:
+            import psycopg2
+
+            self.conn = psycopg2.connect(url, connect_timeout=15)
+        else:
+            self.conn = sqlite3.connect(DB_PATH)
+        real = "DOUBLE PRECISION" if self.is_pg else "REAL"
+        self.execute(
+            f"""CREATE TABLE IF NOT EXISTS stock_prices (
+                symbol TEXT NOT NULL, date TEXT NOT NULL,
+                open {real}, high {real}, low {real}, close {real}, volume {real},
+                PRIMARY KEY (symbol, date))"""
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS stock_fetch_state (
-            symbol TEXT PRIMARY KEY,
-            first_date TEXT,
-            last_date TEXT,
-            checked_at TEXT
+        self.execute(
+            """CREATE TABLE IF NOT EXISTS stock_fetch_state (
+                symbol TEXT PRIMARY KEY, first_date TEXT, last_date TEXT, checked_at TEXT)"""
         )
-        """
-    )
-    return conn
+        self.commit()
+
+    def _sql(self, sql: str) -> str:
+        return sql.replace("?", "%s") if self.is_pg else sql
+
+    def execute(self, sql: str, params=()):
+        cur = self.conn.cursor()
+        cur.execute(self._sql(sql), tuple(params))
+        return cur
+
+    def rows(self, sql: str, params=()) -> list:
+        cur = self.execute(sql, params)
+        out = cur.fetchall()
+        cur.close()
+        return out
+
+    def frame(self, sql: str, params=()) -> pd.DataFrame:
+        cur = self.execute(sql, params)
+        cols = [d[0] for d in cur.description]
+        out = pd.DataFrame(cur.fetchall(), columns=cols)
+        cur.close()
+        return out
+
+    def upsert_prices(self, rows: list) -> None:
+        if not rows:
+            return
+        sql = (
+            "INSERT INTO stock_prices (symbol, date, open, high, low, close, volume) VALUES {} "
+            "ON CONFLICT (symbol, date) DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, "
+            "low = EXCLUDED.low, close = EXCLUDED.close, volume = EXCLUDED.volume"
+        )
+        if self.is_pg:
+            from psycopg2.extras import execute_values
+
+            cur = self.conn.cursor()
+            execute_values(cur, sql.format("%s"), rows, page_size=1000)  # one round trip per 1000 rows
+            cur.close()
+        else:
+            self.conn.executemany(sql.format("(?,?,?,?,?,?,?)"), rows)
+
+    def commit(self):
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
+
+
+def _connect() -> _Db:
+    return _Db()
 
 
 def yahoo_ticker(symbol: str) -> str:
@@ -110,25 +165,25 @@ def _download(symbols: list[str], start: date, end: date) -> dict[str, pd.DataFr
     return out
 
 
-def _upsert(conn: sqlite3.Connection, symbol: str, frame: pd.DataFrame, replace: bool = False) -> None:
+def _upsert(conn: _Db, symbol: str, frame: pd.DataFrame, replace: bool = False) -> None:
     if replace:
         conn.execute("DELETE FROM stock_prices WHERE symbol = ?", (symbol,))
     rows = [
         (symbol, ts.strftime("%Y-%m-%d"), _f(r.Open), _f(r.High), _f(r.Low), _f(r.Close), _f(r.Volume))
         for ts, r in frame.iterrows()
     ]
-    conn.executemany("INSERT OR REPLACE INTO stock_prices VALUES (?,?,?,?,?,?,?)", rows)
+    conn.upsert_prices(rows)
 
 
 def _f(x):
     return None if x is None or pd.isna(x) else float(x)
 
 
-def _history_changed(conn: sqlite3.Connection, symbol: str, frame: pd.DataFrame) -> bool:
+def _history_changed(conn: _Db, symbol: str, frame: pd.DataFrame) -> bool:
     """True if closes we already stored disagree with the freshly downloaded overlap."""
-    stored = pd.read_sql_query(
+    stored = conn.frame(
         "SELECT date, close FROM stock_prices WHERE symbol = ? AND date >= ?",
-        conn, params=(symbol, frame.index.min().strftime("%Y-%m-%d")),
+        (symbol, frame.index.min().strftime("%Y-%m-%d")),
     )
     if stored.empty:
         return False
@@ -152,7 +207,7 @@ def update_prices(symbols: list[str], force: bool = False, chunk_size: int = CHU
     try:
         state = {
             r[0]: (r[1], r[2])
-            for r in conn.execute("SELECT symbol, last_date, checked_at FROM stock_fetch_state")
+            for r in conn.rows("SELECT symbol, last_date, checked_at FROM stock_fetch_state")
             if r[0] in set(uniq)
         }
         fresh_start = expected - timedelta(days=FULL_HISTORY_DAYS)
@@ -175,9 +230,11 @@ def update_prices(symbols: list[str], force: bool = False, chunk_size: int = CHU
             return frame[frame.index.date <= expected]  # drop today's partial bar
 
         def _mark(symbol: str, frame: pd.DataFrame | None) -> None:
-            first = conn.execute("SELECT MIN(date), MAX(date) FROM stock_prices WHERE symbol = ?", (symbol,)).fetchone()
+            first = conn.rows("SELECT MIN(date), MAX(date) FROM stock_prices WHERE symbol = ?", (symbol,))[0]
             conn.execute(
-                "INSERT OR REPLACE INTO stock_fetch_state VALUES (?,?,?,?)",
+                "INSERT INTO stock_fetch_state (symbol, first_date, last_date, checked_at) VALUES (?,?,?,?) "
+                "ON CONFLICT (symbol) DO UPDATE SET first_date = EXCLUDED.first_date, "
+                "last_date = EXCLUDED.last_date, checked_at = EXCLUDED.checked_at",
                 (symbol, first[0], first[1], now.isoformat()),
             )
 
@@ -240,7 +297,7 @@ def load_history(symbols: list[str]) -> dict[str, pd.DataFrame]:
     conn = _connect()
     try:
         q = f"SELECT * FROM stock_prices WHERE symbol IN ({','.join('?' * len(uniq))}) ORDER BY symbol, date"
-        df = pd.read_sql_query(q, conn, params=uniq)
+        df = conn.frame(q, uniq)
     finally:
         conn.close()
     out = {}
@@ -263,8 +320,9 @@ def get_status(symbols: list[str]) -> dict:
     conn = _connect()
     try:
         q = f"SELECT COUNT(*), MAX(last_date), MIN(last_date), MAX(checked_at) FROM stock_fetch_state WHERE symbol IN ({','.join('?' * len(uniq))}) AND last_date IS NOT NULL"
-        n, latest, oldest, checked = conn.execute(q, uniq).fetchone()
-        rows = conn.execute(f"SELECT COUNT(*) FROM stock_prices WHERE symbol IN ({','.join('?' * len(uniq))})", uniq).fetchone()[0]
+        n, latest, oldest, checked = conn.rows(q, uniq)[0]
+        rows = conn.rows(f"SELECT COUNT(*) FROM stock_prices WHERE symbol IN ({','.join('?' * len(uniq))})", uniq)[0][0]
     finally:
         conn.close()
-    return {"symbols": n, "latest_session": latest, "oldest_latest": oldest, "checked_at": checked, "rows": rows}
+    return {"symbols": n, "latest_session": latest, "oldest_latest": oldest, "checked_at": checked, "rows": rows,
+            "backend": "Postgres (shared)" if get_setting("DATABASE_URL") else "local SQLite"}

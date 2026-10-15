@@ -11,6 +11,10 @@ from strategies import nse_etf_momentum as base  # noqa: E402
 
 st.set_page_config(page_title="ATH Averaging Backtest", page_icon="\U0001F4C9", layout="wide")
 
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+
 st.title("\U0001F4C9 ATH-Drop Averaging Backtest")
 st.caption(
     f"Rule: buy tranche 1 when price first touches -{ath.ATH_DROP_TRIGGER*100:.0f}% below its running "
