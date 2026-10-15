@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -27,6 +28,59 @@ ADD_STATUS_COLORS = {
 }
 
 
+GOOD = "background-color: #c6efce; color: #006100"
+BAD = "background-color: #ffc7ce; color: #9c0006"
+MID = "background-color: #ffeb9c; color: #9c6500"
+
+
+def _rate(value, good, bad, higher_is_better=True):
+    """GOOD/BAD/MID style for a number against two cut-offs (blank if missing)."""
+    if value is None or pd.isna(value):
+        return ""
+    if not higher_is_better:
+        value, good, bad = -value, -good, -bad
+    if value >= good:
+        return GOOD
+    if value <= bad:
+        return BAD
+    return MID
+
+
+def _vp_zone_style(row):
+    """Zone is only 'good' when volume confirms it (see the how-to-read box)."""
+    zone, ud, vt = row.get("VP Zone", ""), row.get("Up/Down Vol"), row.get("Vol Trend")
+    if zone == "Below value area":
+        if pd.isna(ud):
+            return ""
+        return GOOD if ud >= 1.2 else (BAD if ud < 0.8 else MID)
+    if zone == "Above value area":
+        if pd.isna(vt):
+            return ""
+        return GOOD if vt >= 1.0 else MID
+    return ""
+
+
+def style_holdings(df: pd.DataFrame):
+    """Green = favours the stock, red = works against it, amber = in between."""
+    rules = {
+        "RS 1M": lambda v: _rate(v, 0.02, -0.02),
+        "RS 3M": lambda v: _rate(v, 0.02, -0.02),
+        "vs 200DMA": lambda v: _rate(v, 0.0, -0.10),
+        "Vol Trend": lambda v: _rate(v, 1.2, 0.7),
+        "Up/Down Vol": lambda v: _rate(v, 1.2, 0.8),
+        "Overhead Supply": lambda v: _rate(v, 0.30, 0.70, higher_is_better=False),
+        "Supply to +25%": lambda v: _rate(v, 0.40, 0.70, higher_is_better=False),
+    }
+    styler = df.style
+    for col, fn in rules.items():
+        if col in df:
+            styler = styler.map(lambda v, fn=fn: fn(v), subset=[col])
+    if "VP Zone" in df:
+        zone_styles = df.apply(_vp_zone_style, axis=1)
+        styler = styler.apply(lambda col: zone_styles, subset=["VP Zone"])
+    return styler
+
+
 def _color_by_add_status(row):
     style = ADD_STATUS_COLORS.get(row["Add Status"], "")
     return [style] * len(row)
@@ -35,6 +89,11 @@ def _color_by_add_status(row):
 @st.cache_data(ttl=300, show_spinner="Fetching live prices from Yahoo Finance...")
 def _cached_live_prices(symbols: tuple) -> dict:
     return strategy.fetch_live_prices(list(symbols))
+
+
+@st.cache_data(ttl=3600, show_spinner="Fetching price history for RS & technicals...")
+def _cached_market_stats(symbols: tuple):
+    return strategy.fetch_market_stats(list(symbols))
 
 
 @st.cache_data(ttl=300, show_spinner="Loading positions from Google Sheet...")
@@ -48,6 +107,7 @@ uploaded = st.sidebar.file_uploader("...or upload a copy instead", type=["xlsx"]
 
 st.sidebar.header("Live prices")
 use_live = st.sidebar.checkbox("Use live CMP (Yahoo Finance, NSE)", value=False)
+use_rs = st.sidebar.checkbox("Show RS vs Nifty & technicals", value=True)
 
 st.sidebar.header("Sizing rules")
 max_alloc_pct = st.sidebar.slider("Max allocation per stock (%)", 1, 15, 5) / 100
@@ -73,6 +133,7 @@ refresh_clicked = st.sidebar.button("🔄 Refresh (re-fetch sheet + live prices)
 if refresh_clicked:
     _cached_live_prices.clear()
     _cached_positions.clear()
+    _cached_market_stats.clear()
 
 try:
     raw = strategy.load_open_positions(uploaded) if uploaded is not None else _cached_positions(path_input)
@@ -87,6 +148,7 @@ if uploaded is None and strategy.is_google_sheet_url(path_input):
     )
 
 live_prices = _cached_live_prices(tuple(sorted(raw["Stock"].dropna().unique()))) if use_live and not raw.empty else {}
+rs_table = _cached_market_stats(tuple(sorted(raw["Stock"].dropna().unique()))) if use_rs and not raw.empty else None
 
 exit_rules = strategy.ExitRules(
     short_term_years=short_term_years, short_term_gain=short_term_gain,
@@ -99,6 +161,7 @@ sizing_rules = strategy.SizingRules(
 
 result: strategy.PositionGuideResult = strategy.analyze(
     raw, exit_rules, sizing_rules, capital_base=capital_override or None, live_prices=live_prices,
+    market_stats=rs_table,
 )
 
 if not result.ok:
@@ -129,6 +192,75 @@ c3.metric("Current value", f"₹{stocks['Current Value'].sum():,.0f}")
 overall_gain = stocks["Current Value"].sum() / stocks["Buy Value"].sum() - 1.0
 c4.metric("Unrealized gain", f"{overall_gain:+.1%}")
 
+RS_CONFIG = {
+    col: st.column_config.NumberColumn(format="percent", help="Stock return minus Nifty 50 return over the window. Positive = beating Nifty.")
+    for col in strategy.RS_COLUMNS
+}
+
+st.divider()
+st.header(f"📋 Holdings — {len(stocks)} stock(s)")
+st.caption(
+    "One row per stock you own (analysis fields only - sheet details are in the Exit / Add More sections below). "
+    "**RS** = stock return minus Nifty return over 1M/3M (positive = beating Nifty). "
+    "**52W High Drop** / **vs 200DMA** = CMP vs 52-week closing high / 200-day average. "
+    "**Vol Trend** = 20-day avg volume / 90-day avg (>1x = interest rising). "
+    "**Up/Down Vol** = volume on up-days / down-days, last 60 sessions (>1x = buyers dominate). "
+    "**Volume profile** is built from the last ~6 months: POC = price with the most volume, VAL-VAH = zone holding 70% of it, "
+    "**VP Zone** = where CMP sits, **Overhead Supply** = share of that volume traded above CMP (trapped holders who may sell into a recovery), **Supply to +25%** = share of that volume traded between CMP and 25% above it (the supply standing between you and a +25% exit). "
+    "**Colours:** 🟩 favours the stock, 🟥 works against it, 🟨 in between - RS beating/lagging Nifty by 2 pts, price above/10% below the 200DMA, "
+    "Vol Trend ≥1.2x / <0.7x, Up/Down Vol ≥1.2x / <0.8x, Overhead Supply ≤30% / ≥70%, Supply to +25% ≤40% / ≥70%, "
+    "VP Zone green only when volume confirms (below value area with Up/Down ≥1.2x = accumulation; above VAH with rising volume). "
+    "52W High Drop and vs POC are left uncoloured - they are levels, not good/bad signals. "
+    "Based on last completed daily bars; blank = not enough history."
+)
+with st.expander("How to read the volume profile (what to do with it)"):
+    st.markdown(
+        """
+**Volume profile shows *where* the market agreed on value** - prices with heavy volume act as support/resistance, thin zones get crossed fast.
+
+| Situation | Read it as | Action for you |
+|---|---|---|
+| **Below value area** + Up/Down Vol > 1x + Vol Trend > 1x | Discount zone with buyers absorbing supply = accumulation | Best place to *add* (if the Add More table says Ready) |
+| **Below value area** + Up/Down Vol < 1x | Sellers still in control - cheap for a reason | Do **not** average; wait for Up/Down Vol to turn > 1x |
+| **At POC / In value area** | Fair value, balance | Hold; no edge to add or trim |
+| **Above VAH** (breaking out) + Vol Trend > 1x | Acceptance at new prices = trend start | Hold winners; this is the confirmation your framework waits for |
+| **Above VAH** + Vol Trend < 1x | Stretched on thin volume | Good time to take exits you already planned |
+
+**Overhead Supply** matters most for stocks you're averaging down on: **> 70%** means most of the last 6 months' volume traded *above* today's price - lots of trapped holders, so rallies meet heavy selling (expect slow recovery, set exits at POC/VAH rather than hoping for more). **< 30%** means little resistance above.
+
+**Targets:** use **POC** as the first realistic target and **VAH** as the second, for stocks sitting below the value area.
+
+Limits: built from daily high/low/volume (each day's volume spread evenly over its range), so it's an approximation of a tick-level profile - use it to rank and sanity-check, not for precise levels.
+        """
+    )
+
+if use_rs and "RS 3M" not in stocks:
+    st.warning("Market data (RS / technicals) could not be fetched right now - try Refresh.")
+
+analysis_cols = strategy.RS_COLUMNS + strategy.TECH_COLUMNS + ["vs POC", "VP Zone"]
+vp_hidden = {"VP Low (VAL)", "VP POC", "VP High (VAH)"}
+holdings_cols = ["Stock"] + [c for c in analysis_cols if c in stocks.columns and c not in vp_hidden]
+st.dataframe(
+    style_holdings(stocks[holdings_cols]),
+    column_config={
+        "52W High Drop": st.column_config.NumberColumn(format="percent"),
+        "vs 200DMA": st.column_config.NumberColumn(format="percent"),
+        "Vol Trend": st.column_config.NumberColumn(format="%.2fx"),
+        "Up/Down Vol": st.column_config.NumberColumn(format="%.2fx"),
+        "vs POC": st.column_config.NumberColumn(format="percent"),
+        "Overhead Supply": st.column_config.NumberColumn(format="percent"),
+        "Supply to +25%": st.column_config.NumberColumn(format="percent"),
+        **RS_CONFIG,
+    },
+    hide_index=True, width="stretch",
+)
+st.download_button(
+    "⬇️ Download holdings as CSV",
+    data=stocks[holdings_cols].to_csv(index=False).encode("utf-8"),
+    file_name="holdings.csv",
+    mime="text/csv",
+)
+
 st.divider()
 st.header(f"🔴 Exit — {len(exits)} tranche(s)")
 st.caption("Every open buy lot that has cleared its exit bar (short-term flat gain, or CAGR bar by holding period), with the exact tranche to sell.")
@@ -146,6 +278,7 @@ else:
             "Current Value": st.column_config.NumberColumn(format="₹%.0f"),
             "CAGR": st.column_config.NumberColumn(format="percent"),
             "Holding Years": st.column_config.NumberColumn(format="%.2f"),
+            **RS_CONFIG,
         },
         hide_index=True, width="stretch",
     )
@@ -177,6 +310,7 @@ else:
             "CMP": st.column_config.NumberColumn(format="%.2f"),
             "Down %": st.column_config.NumberColumn(format="percent"),
             "Max Buy Allowed": st.column_config.NumberColumn(format="₹%.0f"),
+            **RS_CONFIG,
         },
         hide_index=True, width="stretch",
     )

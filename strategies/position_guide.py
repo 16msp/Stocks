@@ -160,6 +160,166 @@ def fetch_live_prices(symbols: list[str], chunk_size: int = CHUNK_SIZE) -> dict[
     return prices
 
 
+NIFTY_TICKER = "^NSEI"
+RS_WINDOWS = {"1M": 30, "3M": 91}  # calendar days
+RS_COLUMNS = [f"RS {w}" for w in RS_WINDOWS]
+
+
+def _window_return(close: pd.Series, days: int) -> float:
+    """Return over the last `days` calendar days, NaN if history doesn't reach back that far."""
+    close = close.dropna()
+    if close.empty:
+        return np.nan
+    cutoff = close.index[-1] - pd.Timedelta(days=days)
+    if close.index[0] > cutoff:
+        return np.nan
+    base = close.loc[:cutoff]
+    if base.empty or base.iloc[-1] <= 0:
+        return np.nan
+    return float(close.iloc[-1] / base.iloc[-1] - 1.0)
+
+
+TECH_COLUMNS = ["52W High Drop", "vs 200DMA", "Vol Trend", "Up/Down Vol", "VP Low (VAL)", "VP POC", "VP High (VAH)", "Overhead Supply", "Supply to +25%"]
+VP_BINS = 40
+VP_VALUE_AREA = 0.70
+VP_LOOKBACK = 126  # ~6 months of sessions
+
+
+def volume_profile(df: pd.DataFrame, ref_price: float | None = None, band_pct: float = 0.25, bins: int = VP_BINS, value_area: float = VP_VALUE_AREA):
+    """Fixed-range volume profile over `df` (needs High/Low/Volume columns).
+
+    Each day's volume is spread evenly over the price bins its low-high range
+    touches. Returns (VAL, POC, VAH, overhead, band_supply): POC is the price bin with the
+    most volume, VAL/VAH bound the contiguous zone around it holding
+    `value_area` of total volume, and overhead is the share of the window's
+    volume that traded above `ref_price` (supply from holders who bought
+    higher and may sell into a recovery), and band_supply is the share that
+    traded between `ref_price` and `ref_price * (1 + band_pct)` - the supply
+    standing in the way of a `band_pct` move up. NaNs if the range is degenerate.
+    """
+    d = df.dropna(subset=["High", "Low", "Volume"])
+    d = d[(d["Volume"] > 0) & (d["High"] >= d["Low"])]
+    if len(d) < 5:
+        return (np.nan,) * 5
+    lo, hi = float(d["Low"].min()), float(d["High"].max())
+    if hi <= lo:
+        return (np.nan,) * 5
+    edges = np.linspace(lo, hi, bins + 1)
+    vol = np.zeros(bins)
+    for h, l, v in zip(d["High"].to_numpy(), d["Low"].to_numpy(), d["Volume"].to_numpy()):
+        i0 = min(bins - 1, int(np.searchsorted(edges, l, side="right") - 1))
+        i1 = min(bins - 1, int(np.searchsorted(edges, h, side="right") - 1))
+        i0 = max(i0, 0)
+        vol[i0:i1 + 1] += v / (i1 - i0 + 1)
+    poc = int(vol.argmax())
+    lo_i = hi_i = poc
+    covered, target = vol[poc], vol.sum() * value_area
+    while covered < target and (lo_i > 0 or hi_i < bins - 1):
+        down = vol[lo_i - 1] if lo_i > 0 else -1.0
+        up = vol[hi_i + 1] if hi_i < bins - 1 else -1.0
+        if up >= down:
+            hi_i += 1
+            covered += vol[hi_i]
+        else:
+            lo_i -= 1
+            covered += vol[lo_i]
+    centers = (edges[:-1] + edges[1:]) / 2
+    overhead = float(vol[centers > ref_price].sum() / vol.sum()) if ref_price is not None else np.nan
+    band = (
+        float(vol[(centers > ref_price) & (centers <= ref_price * (1 + band_pct))].sum() / vol.sum())
+        if ref_price is not None else np.nan
+    )
+    return float(edges[lo_i]), float(centers[poc]), float(edges[hi_i + 1]), overhead, band
+
+
+def _technicals(hist: pd.DataFrame) -> dict:
+    """Technical attributes from ~14 months of daily OHLCV for one stock."""
+    out = {c: np.nan for c in TECH_COLUMNS}
+    hist = hist.dropna(subset=["Close"])
+    if len(hist) < 30:
+        return out
+    close, vol = hist["Close"], hist["Volume"]
+    last = float(close.iloc[-1])
+
+    year = hist.loc[hist.index >= hist.index[-1] - pd.Timedelta(days=365)]
+    high_52w = float(year["Close"].max())
+    out["52W High Drop"] = last / high_52w - 1.0
+    if len(close) >= 200:
+        out["vs 200DMA"] = last / float(close.iloc[-200:].mean()) - 1.0
+    if len(vol) >= 90 and vol.iloc[-90:].mean() > 0:
+        out["Vol Trend"] = float(vol.iloc[-20:].mean() / vol.iloc[-90:].mean())
+
+    recent = hist.iloc[-60:]
+    chg = recent["Close"].diff()
+    up_v, dn_v = recent.loc[chg > 0, "Volume"].sum(), recent.loc[chg < 0, "Volume"].sum()
+    if dn_v > 0:
+        out["Up/Down Vol"] = float(up_v / dn_v)
+
+    # Trailing ~6-month fixed-range profile: recent enough to reflect where the
+    # current base was built (an anchor at the 52W high breaks on stocks that
+    # crashed - the POC ends up far above any price they will see again).
+    out["VP Low (VAL)"], out["VP POC"], out["VP High (VAH)"], out["Overhead Supply"], out["Supply to +25%"] = volume_profile(
+        hist.iloc[-VP_LOOKBACK:], ref_price=last
+    )
+    return out
+
+
+def fetch_market_stats(symbols: list[str], chunk_size: int = CHUNK_SIZE) -> pd.DataFrame:
+    """Per-symbol market stats from ~14 months of Yahoo daily bars (NSE ".NS").
+
+    - RS 1M/3M: relative strength vs Nifty 50 = stock return minus Nifty
+      return over the window (return fractions; positive = beating Nifty).
+    - 52W High Drop, vs 200DMA, Vol Trend (20d vs 90d avg volume), Up/Down Vol
+      (volume on up days / down days, last 60 sessions).
+    - Volume profile (VAL / POC / VAH, overhead supply) over the last ~6 months.
+
+    Uses last completed daily closes. Unresolved symbols or insufficient
+    history give NaN for the affected fields.
+    """
+    uniq = sorted({s for s in symbols if isinstance(s, str) and s})
+    out = pd.DataFrame(index=pd.Index(uniq, name="Stock"), columns=RS_COLUMNS + TECH_COLUMNS, dtype=float)
+    if not uniq:
+        return out
+
+    nifty_ret = {w: np.nan for w in RS_WINDOWS}
+    try:
+        nifty = yf.download(NIFTY_TICKER, period="14mo", interval="1d", progress=False, auto_adjust=False)["Close"]
+        nifty = nifty.squeeze().dropna()
+        if not nifty.empty:
+            nifty_ret = {w: _window_return(nifty, d) for w, d in RS_WINDOWS.items()}
+    except Exception:
+        pass
+
+    for i in range(0, len(uniq), chunk_size):
+        chunk = uniq[i:i + chunk_size]
+        yahoo_symbols = [f"{s}.NS" for s in chunk]
+        try:
+            data = yf.download(
+                yahoo_symbols, period="14mo", interval="1d",
+                group_by="ticker", threads=True, progress=False, auto_adjust=False,
+            )
+        except Exception:
+            continue
+        if data is None or data.empty:
+            continue
+        for sym, ysym in zip(chunk, yahoo_symbols):
+            try:
+                hist = data if len(chunk) == 1 else data[ysym]
+                hist = hist[["Close", "High", "Low", "Volume"]]
+                if isinstance(hist.columns, pd.MultiIndex):
+                    hist = hist.droplevel(-1, axis=1)
+                hist = hist.dropna(subset=["Close"])
+            except (KeyError, TypeError):
+                continue
+            if hist.empty:
+                continue
+            for w, d in RS_WINDOWS.items():
+                out.loc[sym, f"RS {w}"] = _window_return(hist["Close"], d) - nifty_ret[w]
+            for k, v in _technicals(hist).items():
+                out.loc[sym, k] = v
+    return out
+
+
 def apply_live_prices(df: pd.DataFrame, live_prices: dict[str, float]) -> pd.DataFrame:
     out = df.copy()
     out["CMP Source"] = "sheet"
@@ -354,6 +514,17 @@ def compute_stock_summary(lots: pd.DataFrame, sizing: SizingRules, capital_base:
     return result.sort_values(["_order", "Gain %"], ascending=[True, False]).drop(columns="_order").reset_index(drop=True)
 
 
+def _vp_zone(row: pd.Series) -> str:
+    cmp, val, poc, vah = row["CMP"], row["VP Low (VAL)"], row["VP POC"], row["VP High (VAH)"]
+    if any(pd.isna(x) for x in (cmp, val, poc, vah)):
+        return ""
+    if cmp < val:
+        return "Below value area"
+    if cmp > vah:
+        return "Above value area"
+    return "At POC" if abs(cmp / poc - 1.0) <= 0.03 else "In value area"
+
+
 def analyze(
     raw: pd.DataFrame,
     exit_rules: ExitRules,
@@ -361,6 +532,7 @@ def analyze(
     capital_base: float | None = None,
     live_prices: dict[str, float] | None = None,
     as_of=None,
+    market_stats: pd.DataFrame | None = None,
 ) -> PositionGuideResult:
     if raw.empty:
         return PositionGuideResult(ok=False, message="No open positions found in the workbook.")
@@ -372,8 +544,21 @@ def analyze(
     lots = compute_lot_metrics(df, exit_rules, as_of=as_of)
     base = capital_base if capital_base else lots["Buy Value"].sum()
     stocks = compute_stock_summary(lots, sizing_rules, base)
+    if market_stats is not None and not market_stats.empty:
+        ms = market_stats.reindex(stocks["Stock"])
+        for col in RS_COLUMNS + TECH_COLUMNS:
+            if col in ms:
+                stocks[col] = ms[col].to_numpy()
+        if "VP POC" in stocks:
+            stocks["vs POC"] = stocks["CMP"] / stocks["VP POC"] - 1.0
+            stocks["VP Zone"] = stocks.apply(_vp_zone, axis=1)
     exits = build_exit_table(lots)
     add_candidates = compute_add_candidates(lots, sizing_rules, base)
+    if "RS 3M" in stocks:
+        rs3 = stocks.set_index("Stock")["RS 3M"]
+        for table in (exits, add_candidates):
+            if not table.empty:
+                table["RS 3M"] = table["Stock"].map(rs3)
 
     live_count = int((lots["CMP Source"] == "live").sum())
     fallback = sorted(lots.loc[lots["CMP Source"] == "sheet", "Stock"].unique().tolist())
