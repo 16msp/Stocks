@@ -26,8 +26,8 @@ def main() -> int:
     args = parser.parse_args()
 
     symbols = {pg.NIFTY_TICKER}
-    for sector in sector_scanner.SECTORS:
-        universe, source = sector_scanner.load_universe(sector, refresh=True)
+    for i, sector in enumerate(sector_scanner.SECTORS):
+        universe, source = sector_scanner.load_universe(sector, refresh=(i == 0))  # download NSE's list once
         print(f"{sector}: {len(universe)} stocks ({source})")
         symbols.update(universe["Stock"])
 
