@@ -27,14 +27,28 @@ from strategies import position_guide as pg
 EQUITY_LIST_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 CACHE_PATH = Path(__file__).resolve().parent.parent / "sector_universe_cache.json"
 
-# One entry per sector, added as each is "frozen". `name_regex` is matched against the
-# company name in NSE's equity list; `fallback` is used only if NSE can't be reached
-# and nothing is cached yet.
+# One entry per sector, added as each is "frozen". A sector is defined either by
+# `name_regex` (matched against the company name in NSE's equity list) or by an explicit
+# `symbols` list (when the name can't tell, e.g. public vs private banks). `fallback` is
+# used only if NSE can't be reached and nothing is cached yet.
 SECTORS: dict[str, dict] = {
     "Small Finance Banks": {
         "name_regex": r"small finance bank",
         "fallback": ["AUBANK", "CAPITALSFB", "EQUITASBNK", "ESAFSFB", "JSFB", "SURYODAY", "UJJIVANSFB", "UTKARSHBNK"],
         "note": "Listed small finance banks (NSE equity list, matched on 'Small Finance Bank' in the company name).",
+    },
+    "Public Sector Banks": {
+        "symbols": ["SBIN", "BANKBARODA", "BANKINDIA", "CANBK", "CENTRALBK", "INDIANB", "IOB", "MAHABANK",
+                    "PNB", "PSB", "UCOBANK", "UNIONBANK"],
+        "note": "The 12 government-owned public sector banks listed on NSE (explicit list).",
+    },
+    "Private Banks": {
+        "symbols": ["HDFCBANK", "ICICIBANK", "AXISBANK", "KOTAKBANK", "INDUSINDBK", "FEDERALBNK", "IDFCFIRSTB",
+                    "BANDHANBNK", "RBLBANK", "YESBANK", "IDBI", "CUB", "KARURVYSYA", "SOUTHBANK", "KTKBANK",
+                    "DCBBANK", "CSBBANK", "DHANBANK", "J&KBANK", "TMB"],
+        "note": "Private sector banks listed on NSE (explicit list, RBI categories). IDBI Bank is included "
+                "because RBI classes it as private even though the government and LIC still control it; "
+                "J&K Bank is included on the same basis. Small finance and payments banks are excluded.",
     },
 }
 
@@ -83,9 +97,16 @@ def _load_equity_list(refresh: bool = False) -> tuple[pd.DataFrame | None, str]:
 
 def load_universe(sector: str, refresh: bool = False) -> tuple[pd.DataFrame, str]:
     cfg = SECTORS[sector]
+    explicit = cfg.get("symbols") or cfg.get("fallback")
     equities, source = _load_equity_list(refresh)
     if equities is None:
-        return pd.DataFrame({"Stock": cfg["fallback"], "Company": "", "Series": "", "Listed": ""}), source + " - using built-in list"
+        return pd.DataFrame({"Stock": explicit, "Company": "", "Series": "", "Listed": ""}), source + " - using built-in list"
+    if "symbols" in cfg:
+        uni = equities[equities["Stock"].isin(cfg["symbols"])].sort_values("Stock").reset_index(drop=True)
+        missing = sorted(set(cfg["symbols"]) - set(uni["Stock"]))
+        if missing:
+            source += f" - not on NSE list any more: {', '.join(missing)}"
+        return uni, source
     mask = equities["Company"].str.contains(cfg["name_regex"], flags=re.I, regex=True)
     uni = equities[mask].sort_values("Stock").reset_index(drop=True)
     return uni, source
