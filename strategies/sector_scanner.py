@@ -93,7 +93,20 @@ SECTORS: dict[str, dict] = {
                 "Passenger Vehicles and TMCV = Tata Motors (commercial vehicles) after the demerger; MSUMI = "
                 "Motherson Sumi Wiring and ARE&M = Amara Raja Energy & Mobility.",
     },
+    "Metals": {
+        "symbols": ["TATASTEEL", "JSWSTEEL", "JINDALSTEL", "SAIL", "JSL", "NSLNISP", "LLOYDSME", "GPIL",
+                    "SHYAMMETL", "SARDAEN", "VSSL", "KIRLFER", "ELECTCAST", "SSWL", "STEELCAS", "SUNFLAG",
+                    "HINDALCO", "NATIONALUM", "VEDL", "HINDZINC", "HINDCOPPER", "GRAVITA", "NMDC", "MOIL",
+                    "SANDUMA", "KIOCL", "GRAPHITE", "IMFA", "MAITHANALL", "MIDHANI", "APLAPOLLO", "RATNAMANI",
+                    "JINDALSAW", "WELCORP", "MAHSEAMLES", "MANINDS", "HITECH", "VENUSPIPES", "STEELXIND"],
+        "note": "Listed steel, aluminium, copper, zinc and mining companies plus steel pipe and tube makers "
+                "on NSE (explicit list). Coal India is excluded. The newly demerged Vedanta units (VAML, VISL) "
+                "are left out until they have enough price history. WELCORP = Welspun Corp, STEELXIND = Steel "
+                "Exchange India.",
+    },
 }
+
+PRICE_BREAK = -0.35  # a one-day fall this big in the last year = probably a demerger, so the history is not comparable
 
 MIN_LIQUIDITY_CR = 0.5  # avg daily traded value below this (Rs crore) = thin, hard to build a position
 
@@ -161,6 +174,13 @@ def recommend(row: pd.Series) -> tuple[str, str]:
     score = row.get("Buy Score")
     if pd.isna(score) or pd.isna(row.get("52W High Drop")):
         return "Insufficient data", "Not enough price history on Yahoo."
+
+    worst = row.get("Worst 1D Move")
+    if pd.notna(worst) and worst <= PRICE_BREAK:
+        return "Price break - check", (
+            f"✖ one-day fall of {abs(worst):.0%} in the last year - usually a demerger or other corporate action "
+            "that Yahoo does not adjust for, so the 52W high, volume profile and score are unreliable. Check manually."
+        )
 
     drop, dsl = row["52W High Drop"], row.get("Days Since Low")
     ud, rs3, sup = row.get("Up/Down Vol"), row.get("RS 3M"), row.get("Supply to +25%")
@@ -232,13 +252,13 @@ def scan_sector(sector: str, market_stats: pd.DataFrame, universe: pd.DataFrame,
     t["Recommendation"], t["Why"] = calls[0], calls[1]
     t["Owned"] = t["Stock"].map(lambda s: "✅ Owned" if owned and s in owned else "")
 
-    order = {"Accumulate": 0, "Strong - wait for dip": 1, "Watch - base forming": 2, "Avoid for now": 3, "Insufficient data": 4}
+    order = {"Accumulate": 0, "Strong - wait for dip": 1, "Watch - base forming": 2, "Avoid for now": 3, "Price break - check": 4, "Insufficient data": 5}
     t["_o"] = t["Recommendation"].map(order)
     t = t.sort_values(["_o", "Buy Score"], ascending=[True, False]).drop(columns="_o").reset_index(drop=True)
     t["Pick"] = ""
     t.loc[t.index[t["Recommendation"] == "Accumulate"][:3], "Pick"] = "⭐ Top pick"
 
-    valid = t[t["Last Close"].notna()]
+    valid = t[t["Last Close"].notna() & (t["Recommendation"] != "Price break - check")]
     summary = {
         "stocks": len(t),
         "with_data": len(valid),
