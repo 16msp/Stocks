@@ -50,6 +50,14 @@ SECTORS: dict[str, dict] = {
                 "because RBI classes it as private even though the government and LIC still control it; "
                 "J&K Bank is included on the same basis. Small finance and payments banks are excluded.",
     },
+    "IT Services & Software": {
+        "symbols": ["TCS", "INFY", "HCLTECH", "WIPRO", "TECHM", "LTM", "PERSISTENT", "COFORGE", "MPHASIS",
+                    "OFSS", "LTTS", "KPITTECH", "TATAELXSI", "CYIENT", "SONATSOFTW", "BSOFT", "ZENSARTECH",
+                    "MASTEK", "INTELLECT", "NEWGEN", "ECLERX", "HAPPSTMNDS", "LATENTVIEW", "TATATECH",
+                    "SAKSOFT", "DATAMATICS", "TANLA", "RATEGAIN", "AFFLE", "ROUTE", "SASKEN"],
+        "note": "Listed IT services, product and engineering-services companies on NSE (explicit list): the "
+                "Nifty IT constituents plus the main mid and small caps. LTM is LTIMindtree's current NSE symbol.",
+    },
 }
 
 MIN_LIQUIDITY_CR = 0.5  # avg daily traded value below this (Rs crore) = thin, hard to build a position

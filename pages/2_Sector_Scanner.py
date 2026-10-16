@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+from urllib.parse import quote
+
 import pandas as pd
 import streamlit as st
 
@@ -115,6 +117,14 @@ st.caption(
 REC_ICON = {"Accumulate": "🟢", "Strong - wait for dip": "🟡", "Watch - base forming": "🟡", "Avoid for now": "🔴", "Insufficient data": "⚪"}
 
 
+def tradingview_url(symbol):
+    return f"https://www.tradingview.com/chart/?symbol=NSE%3A{quote(symbol, safe='')}"
+
+
+def screener_url(symbol):
+    return f"https://www.screener.in/company/{quote(symbol, safe='')}/"
+
+
 def _fmt(v, kind):
     if v is None or pd.isna(v):
         return "n/a"
@@ -141,6 +151,7 @@ def render_card(r):
             pick = f"{r['Pick']} &nbsp; " if r["Pick"] else ""
             st.markdown(f"### {pick}{r['Stock']}{owned}")
             st.caption(r["Company"])
+            st.markdown(f"[📈 TradingView]({tradingview_url(r['Stock'])}) &nbsp;·&nbsp; [📊 Screener]({screener_url(r['Stock'])})")
             st.markdown(f"{REC_ICON.get(r['Recommendation'], '')} **{r['Recommendation']}**")
             st.metric("Buy Score", _fmt(r["Buy Score"], "int"), help="0-100 timing score")
         with body:
@@ -186,7 +197,9 @@ with table_tab:
             "vs 200DMA", "Vol Trend", "Up/Down Vol", "Overhead Supply", "Supply to +25%", "RSI 14", "Days Since Low",
             "Volatility Ratio", "Off 52W Low", "vs POC", "VP Zone", "Avg Value 20D"]
     cols = [c for c in cols if c in t.columns]
-    view = t[cols]
+    view = t[cols].copy()
+    view.insert(cols.index("Stock") + 1, "TradingView", view["Stock"].map(tradingview_url))
+    view.insert(cols.index("Stock") + 2, "Screener", view["Stock"].map(screener_url))
 
 
     def _style(df):
@@ -198,6 +211,8 @@ with table_tab:
     st.dataframe(
         _style(view),
         column_config={
+            "TradingView": st.column_config.LinkColumn("TradingView", display_text="📈 Chart", help="Open the chart on TradingView"),
+            "Screener": st.column_config.LinkColumn("Screener", display_text="📊 Screener", help="Open the company page on screener.in"),
             "CMP": st.column_config.NumberColumn(format="%.2f", help="Last completed daily close"),
             "Buy Score": st.column_config.NumberColumn(format="%.0f"),
             "52W High Drop": st.column_config.NumberColumn(format="percent"),
