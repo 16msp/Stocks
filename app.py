@@ -32,9 +32,9 @@ st.markdown(
     "- **Position Guide** - reads your open positions sheet and, for each stock you own, shows relative "
     "strength vs Nifty, stabilisation, accumulation, volume-profile and supply indicators with a Buy Score. "
     "Also lists tranches to exit and stocks you could add to, ranked by timing.\n"
-    "- **Sector Scanner** - pulls every NSE-listed stock in a sector (Small Finance Banks first), runs the same "
+    "- **Sector Scanner** - pulls every NSE-listed stock in a sector (32 sectors: banks, finance, IT, pharma, FMCG, auto, metals and more), runs the same "
     "checks and gives each a recommendation: Accumulate, Strong - wait for dip, Watch, or Avoid. "
-    "More sectors get added once each is frozen.\n"
+    "Pick a sector from the sidebar dropdown.\n"
     "\nTechnicals only - check fundamentals before buying. Not investment advice."
 )
 

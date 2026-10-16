@@ -50,6 +50,37 @@ SECTORS: dict[str, dict] = {
                 "because RBI classes it as private even though the government and LIC still control it; "
                 "J&K Bank is included on the same basis. Small finance and payments banks are excluded.",
     },
+    "NBFCs": {
+        "symbols": ["BAJFINANCE", "BAJAJFINSV", "SHRIRAMFIN", "CHOLAFIN", "MUTHOOTFIN", "MANAPPURAM", "M&MFIN",
+                    "LTF", "POONAWALLA", "ABCAPITAL", "SBFC", "CREDITACC", "SPANDANA", "FUSION", "JIOFIN", "PFC",
+                    "RECLTD", "IRFC", "IREDA", "HUDCO", "SUNDARMFIN", "TATACAP", "HDBFS", "SAMMAANCAP",
+                    "PIRAMALFIN", "MASFIN", "SBICARD", "IIFL", "PAISALO", "UGROCAP", "SATIN", "ARMANFIN"],
+        "note": "Listed non-banking finance companies on NSE (explicit list): consumer, vehicle, gold, "
+                "microfinance and diversified lenders plus the government infra lenders (PFC, REC, IRFC, "
+                "IREDA, HUDCO). Housing-finance companies are in Housing Finance, and brokers, AMCs and "
+                "exchanges are in Capital Markets. LTF = L&T Finance.",
+    },
+    "Housing Finance": {
+        "symbols": ["BAJAJHFL", "LICHSGFIN", "PNBHOUSING", "CANFINHOME", "AADHARHFC", "APTUS", "HOMEFIRST",
+                    "AAVAS", "REPCOHOME", "GICHSGFIN", "INDIASHLTR"],
+        "note": "Listed housing-finance companies on NSE (explicit list), the home-loan lenders regulated "
+                "by the NHB/RBI as housing finance. HUDCO (a government infra lender) is in NBFCs.",
+    },
+    "Insurance": {
+        "symbols": ["LICI", "SBILIFE", "HDFCLIFE", "ICICIPRULI", "MFSL", "ICICIGI", "NIACL", "GICRE",
+                    "STARHEALTH", "NIVABUPA", "GODIGIT"],
+        "note": "Listed life, general and health insurers on NSE (explicit list), plus Max Financial "
+                "(holding company of Max Life) and the reinsurer GIC Re. PB Fintech (Policybazaar) is in "
+                "Internet & New-age.",
+    },
+    "Capital Markets": {
+        "symbols": ["BSE", "MCX", "CDSL", "ANGELONE", "360ONE", "NUVAMA", "MOTILALOFS", "IIFLCAPS", "JMFINANCIL",
+                    "PRUDENT", "ANANDRATHI", "CHOICEIN", "GEOJITFSL", "SMCGLOBAL", "ARIHANTCAP", "ABSLAMC",
+                    "HDFCAMC", "UTIAMC", "NAM-INDIA", "CAMS", "KFINTECH", "CRISIL", "ICRA", "5PAISA"],
+        "note": "Listed exchanges, depositories, brokers, wealth managers, asset managers, registrars and "
+                "rating agencies on NSE (explicit list). NAM-INDIA = Nippon Life India AM, IIFLCAPS = IIFL "
+                "Capital Services (broker).",
+    },
     "IT Services & Software": {
         "symbols": ["TCS", "INFY", "HCLTECH", "WIPRO", "TECHM", "LTM", "PERSISTENT", "COFORGE", "MPHASIS",
                     "OFSS", "LTTS", "KPITTECH", "TATAELXSI", "CYIENT", "SONATSOFTW", "BSOFT", "ZENSARTECH",
@@ -158,6 +189,119 @@ SECTORS: dict[str, dict] = {
                 "wind turbines (Suzlon, Inox Wind), auto parts, EMS and consumer durables are covered "
                 "elsewhere or excluded. POWERINDIA = Hitachi Energy India, ENRIN = Siemens Energy India, "
                 "GVT&D = GE Vernova T&D India.",
+    },
+    "Cement & Building Materials": {
+        "symbols": ["ULTRACEMCO", "GRASIM", "AMBUJACEM", "ACC", "SHREECEM", "DALBHARAT", "JKCEMENT", "RAMCOCEM",
+                    "NUVOCO", "JKLAKSHMI", "BIRLACORPN", "HEIDELBERG", "INDIACEM", "STARCEMENT", "ORIENTCEM",
+                    "SAGCEM", "KAJARIACER", "CERA", "SOMANYCERA", "ASTRAL", "SUPREMEIND", "FINPIPE", "PRINCEPIPE",
+                    "APOLLOPIPE", "GREENPANEL", "CENTURYPLY", "GREENPLY", "EVERESTIND", "RAMCOIND", "NCLIND",
+                    "ASIANPAINT", "BERGEPAINT", "KANSAINER", "INDIGOPNTS", "PIDILITIND"],
+        "note": "Listed cement makers and building-material companies on NSE (explicit list): tiles and "
+                "sanitaryware, pipes, plywood and panels, fibre-cement and paints and adhesives. Grasim is "
+                "included for its cement business.",
+    },
+    "Chemicals": {
+        "symbols": ["SRF", "DEEPAKNTR", "NAVINFLUOR", "AARTIIND", "ATUL", "TATACHEM", "FLUOROCHEM", "VINATIORGA",
+                    "ALKYLAMINE", "BALAMINES", "CLEAN", "NOCIL", "ANURAS", "CHEMPLASTS", "GALAXYSURF", "TATVA",
+                    "NEOGEN", "LXCHEM", "PCBL", "EPIGRAL", "ROSSARI", "JUBLINGREA", "HIKAL", "PRIVISCL",
+                    "SUDARSCHEM", "CAMLINFINE", "AETHER", "TIRUMALCHM", "VISHNU"],
+        "note": "Listed specialty and commodity chemical companies on NSE (explicit list). Fertilisers and "
+                "crop-protection companies are in Fertilisers & Agrochemicals, and Solar Industries is in "
+                "Defence. CLEAN = Clean Science and Technology.",
+    },
+    "Fertilisers & Agrochemicals": {
+        "symbols": ["UPL", "PIIND", "COROMANDEL", "CHAMBLFERT", "RCF", "NFL", "FACT", "GSFC", "GNFC", "PARADEEP",
+                    "DEEPAKFERT", "ZUARIIND", "SUMICHEM", "DHANUKA", "RALLIS", "BAYERCROP", "SHARDACROP",
+                    "BHARATRAS", "INSECTICID", "ASTEC", "DCMSHRIRAM", "GODREJAGRO", "KSCL"],
+        "note": "Listed fertiliser, crop-protection and agri-input companies on NSE (explicit list), "
+                "including seed company Kaveri Seed (KSCL) and Godrej Agrovet.",
+    },
+    "Paper & Packaging": {
+        "symbols": ["JKPAPER", "WSTCSTPAPR", "TNPL", "ANDHRAPAP", "SESHAPAPER", "KUANTUM", "UFLEX", "HUHTAMAKI",
+                    "COSMOFIRST", "MOLDTKPAC", "TCPLPACK", "EPL", "AGI", "NILKAMAL", "POLYPLEX"],
+        "note": "Listed paper makers and packaging companies on NSE (explicit list): paper and newsprint, "
+                "flexible and rigid plastic packaging and glass containers (AGI Greenpac). EPL = EPL Ltd "
+                "(laminated tubes).",
+    },
+    "Textiles": {
+        "symbols": ["PAGEIND", "KPRMILL", "WELSPUNLIV", "TRIDENT", "VTL", "RAYMOND", "ARVIND", "GOKEX", "RSWM",
+                    "FILATEX", "INDORAMA", "ALOKINDS", "NITINSPIN", "KITEX", "LUXIND", "DOLLAR", "RUPA", "ICIL",
+                    "HIMATSEIDE", "PGIL", "CENTENKA"],
+        "note": "Listed textile, yarn, home-textile and apparel manufacturers on NSE (explicit list). VTL = "
+                "Vardhman Textiles, ICIL = Indo Count, PGIL = Pearl Global, RAYMOND = Raymond Ltd "
+                "(lifestyle and textiles).",
+    },
+    "Consumer Durables": {
+        "symbols": ["VOLTAS", "BLUESTARCO", "CROMPTON", "WHIRLPOOL", "AMBER", "VGUARD", "ORIENTELEC", "SYMPHONY",
+                    "BAJAJELEC", "TTKPRESTIG", "BUTTERFLY", "IFBIND", "EUREKAFORB", "VIPIND", "STOVEKRAFT",
+                    "CELLO", "SFL", "CARYSIL", "EPACK", "WEL", "HAWKINCOOK"],
+        "note": "Listed consumer-durables companies on NSE (explicit list): air-conditioning and cooling, "
+                "fans and appliances, kitchenware, luggage and mattresses. EMS makers (Dixon, Kaynes, PG "
+                "Electroplast) are in Electronics (EMS). SFL = Sheela Foam.",
+    },
+    "Retail & Consumer Discretionary": {
+        "symbols": ["TITAN", "TRENT", "DMART", "ABFRL", "SHOPERSTOP", "VMART", "RELAXO", "CAMPUS", "BATAINDIA",
+                    "METROBRAND", "LIBERTSHOE", "REDTAPE", "ARVINDFASN", "MANYAVAR", "KALYANKJIL", "SENCO",
+                    "THANGAMAYL", "PCJEWELLER", "JUBLFOOD", "DEVYANI", "WESTLIFE", "SAPPHIRE", "RBA"],
+        "note": "Listed retailers, jewellers, footwear and fashion brands and restaurant chains on NSE "
+                "(explicit list). Online companies (Zomato/Eternal, Swiggy, Nykaa, FirstCry, Lenskart) are "
+                "in Internet & New-age. MANYAVAR = Vedant Fashions, RBA = Restaurant Brands Asia (Burger "
+                "King).",
+    },
+    "Hotels, Travel & Aviation": {
+        "symbols": ["INDIGO", "INDHOTEL", "EIHOTEL", "LEMONTREE", "CHALET", "ITCHOTELS", "SAMHI", "JUNIPER",
+                    "TAJGVK", "ORIENTHOT", "MHRIL", "THOMASCOOK", "IRCTC", "TBOTEK", "WONDERLA", "DELTACORP"],
+        "note": "Listed airlines, hotel and resort companies, travel services and leisure on NSE (explicit "
+                "list). Online travel agents (EaseMyTrip, ixigo) are in Internet & New-age.",
+    },
+    "Healthcare Services": {
+        "symbols": ["APOLLOHOSP", "MAXHEALTH", "FORTIS", "NH", "MEDANTA", "RAINBOW", "KIMS", "ASTERDM", "JLHL",
+                    "HCG", "SHALBY", "METROPOLIS", "LALPATHLAB", "THYROCARE", "VIJAYA", "KRSNAA", "POLYMED",
+                    "MEDPLUS"],
+        "note": "Listed hospital chains, diagnostics, pharmacies and medical-device companies on NSE "
+                "(explicit list). MEDANTA = Global Health, NH = Narayana Hrudayalaya, JLHL = Jupiter Life "
+                "Line Hospitals, KIMS = Krishna Institute of Medical Sciences.",
+    },
+    "Logistics & Shipping": {
+        "symbols": ["DELHIVERY", "BLUEDART", "TCI", "TCIEXP", "VRLLOG", "MAHLOG", "ALLCARGO", "GATEWAY", "TVSSCS",
+                    "NAVKARCORP", "GESHIP", "SCI", "SEAMECLTD", "DREDGECORP", "ESSARSHPNG"],
+        "note": "Listed logistics, express and warehousing companies and shipping lines on NSE (explicit "
+                "list). Ports, airports and CONCOR are in Infrastructure.",
+    },
+    "Media & Entertainment": {
+        "symbols": ["SUNTV", "ZEEL", "PVRINOX", "NETWORK18", "DBCORP", "JAGRAN", "NAZARA", "SAREGAMA",
+                    "TIPSMUSIC", "BALAJITELE", "PFOCUS", "TIPSFILMS", "DISHTV", "ZEEMEDIA"],
+        "note": "Listed TV, film, music, radio, print and gaming companies on NSE (explicit list). Cable "
+                "broadband (Hathway, DEN) is in Telecom. PFOCUS = Prime Focus, RADIOCITY = Music Broadcast.",
+    },
+    "Defence & Shipbuilding": {
+        "symbols": ["HAL", "BEL", "BDL", "MAZDOCK", "COCHINSHIP", "GRSE", "DATAPATTNS", "ZENTEC", "PARAS",
+                    "ASTRAMICRO", "MTARTECH", "SOLARINDS", "APOLLO", "IDEAFORGE", "DCXINDIA", "NIBE", "PREMEXPLN"],
+        "note": "Listed defence electronics, aerospace, ordnance and shipbuilding companies on NSE "
+                "(explicit list). APOLLO = Apollo Micro Systems, SOLARINDS = Solar Industries (explosives).",
+    },
+    "Electronics (EMS)": {
+        "symbols": ["DIXON", "KAYNES", "SYRMA", "CYIENTDLM", "AVALON", "PGEL", "MOSCHIP", "ELIN", "NETWEB",
+                    "IKIO", "CENTUM", "KERNEX", "UNIMECH", "SIGMAADV"],
+        "note": "Listed electronics-manufacturing-services, design and component companies on NSE (explicit "
+                "list). Air-conditioner and appliance brands (including Amber) are in Consumer Durables.",
+    },
+    "Sugar & Agri": {
+        "symbols": ["BALRAMCHIN", "TRIVENI", "EIDPARRY", "DALMIASUG", "DWARKESH", "DHAMPURSUG", "AVADHSUGAR",
+                    "MAGADSUGAR", "RENUKA", "BAJAJHIND", "UTTAMSUGAR", "PONNIERODE", "AWL", "AVANTIFEED",
+                    "VENKEYS"],
+        "note": "Listed sugar and ethanol makers and agri-processing companies on NSE (explicit list). AWL "
+                "= AWL Agri Business (edible oils and foods), DWARKESH = Dwarikesh Sugar, KOTARISUG = "
+                "Kothari Sugars.",
+    },
+    "Internet & New-age": {
+        "symbols": ["ETERNAL", "SWIGGY", "NYKAA", "FIRSTCRY", "LENSKART", "PAYTM", "POLICYBZR", "NAUKRI",
+                    "INDIAMART", "JUSTDIAL", "CARTRADE", "MAPMYINDIA", "EASEMYTRIP", "IXIGO", "GROWW", "PWL",
+                    "URBANCO", "MEESHO", "MOBIKWIK", "PINELABS", "ZAGGLE"],
+        "note": "Listed internet platforms and new-age companies on NSE (explicit list): food delivery, "
+                "e-commerce, fintech, online travel and ed-tech. Recent IPOs have little price history, so "
+                "the scanner may show 'Insufficient data'. ETERNAL = Zomato, PAYTM = One 97 Communications, "
+                "GROWW = Billionbrains Garage Ventures, PWL = Physicswallah.",
     },
 }
 
