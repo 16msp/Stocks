@@ -146,6 +146,19 @@ SECTORS: dict[str, dict] = {
                 "container logistics. Defence and shipbuilding, real-estate developers and infra lenders "
                 "(IRFC, HUDCO) are excluded. CEMPRO = Cemindia Projects, KPIL = Kalpataru Projects International.",
     },
+    "Capital Goods": {
+        "symbols": ["SIEMENS", "ABB", "CGPOWER", "POWERINDIA", "ENRIN", "GVT&D", "SCHNEIDER", "BHEL", "TDPOWERSYS",
+                    "VOLTAMP", "TARIL", "INDOTECH", "HBLENGINE", "GENUSPOWER", "POLYCAB", "KEI", "APARINDS",
+                    "RRKABEL", "HAVELLS", "CUMMINSIND", "THERMAX", "KIRLOSENG", "TRITURBINE", "ELGIEQUIP",
+                    "KSB", "KIRLOSBROS", "SHAKTIPUMP", "ISGEC", "GMMPFAUDLR", "INOXINDIA", "PRAJIND",
+                    "LLOYDSENGG", "ACE", "BEML", "AIAENG", "ELECON", "JYOTICNC", "ESABINDIA", "HONAUT",
+                    "TIMKEN", "SKFINDIA", "GRINDWELL", "CARBORUNIV", "WENDT", "HAPPYFORGE"],
+        "note": "Listed capital-goods companies on NSE (explicit list): power and electrical equipment, "
+                "cables, industrial machinery, pumps, process equipment, bearings and abrasives. Defence, "
+                "wind turbines (Suzlon, Inox Wind), auto parts, EMS and consumer durables are covered "
+                "elsewhere or excluded. POWERINDIA = Hitachi Energy India, ENRIN = Siemens Energy India, "
+                "GVT&D = GE Vernova T&D India.",
+    },
 }
 
 PRICE_BREAK = -0.35  # a one-day fall this big in the last year = probably a demerger, so the history is not comparable
