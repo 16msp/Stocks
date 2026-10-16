@@ -80,6 +80,19 @@ SECTORS: dict[str, dict] = {
                 "PGHL = Procter & Gamble Health, SANOFICONR = Sanofi Consumer Healthcare, ABDL = Allied "
                 "Blenders, TI = Tilaknagar, DIAMONDYD = Prataap Snacks.",
     },
+    "Auto": {
+        "symbols": ["MARUTI", "M&M", "TMPV", "TMCV", "BAJAJ-AUTO", "EICHERMOT", "HEROMOTOCO", "TVSMOTOR",
+                    "ASHOKLEY", "HYUNDAI", "ESCORTS", "FORCEMOT", "OLAELEC", "ATHERENERG", "OLECTRA",
+                    "SONACOMS", "BOSCHLTD", "MOTHERSON", "BHARATFORG", "UNOMINDA", "ENDURANCE", "SCHAEFFLER",
+                    "SUNDRMFAST", "TIINDIA", "CRAFTSMAN", "SUPRAJIT", "GABRIEL", "MINDACORP", "ZFCVINDIA",
+                    "CIEINDIA", "SANSERA", "JAMNAAUTO", "LUMAXTECH", "SUBROS", "VARROC", "SJS", "MSUMI",
+                    "AUTOAXLES", "ASKAUTOLTD", "JBMA", "BALKRISIND", "APOLLOTYRE", "CEATLTD", "MRF", "JKTYRE",
+                    "EXIDEIND", "ARE&M"],
+        "note": "Listed auto makers and auto-component companies on NSE (explicit list): cars, commercial "
+                "vehicles, two-wheelers, tractors, EVs, components, tyres and batteries. TMPV = Tata Motors "
+                "Passenger Vehicles and TMCV = Tata Motors (commercial vehicles) after the demerger; MSUMI = "
+                "Motherson Sumi Wiring and ARE&M = Amara Raja Energy & Mobility.",
+    },
 }
 
 MIN_LIQUIDITY_CR = 0.5  # avg daily traded value below this (Rs crore) = thin, hard to build a position
