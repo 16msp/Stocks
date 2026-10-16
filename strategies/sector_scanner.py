@@ -58,6 +58,17 @@ SECTORS: dict[str, dict] = {
         "note": "Listed IT services, product and engineering-services companies on NSE (explicit list): the "
                 "Nifty IT constituents plus the main mid and small caps. LTM is LTIMindtree's current NSE symbol.",
     },
+    "Pharma": {
+        "symbols": ["SUNPHARMA", "CIPLA", "DRREDDY", "DIVISLAB", "LUPIN", "AUROPHARMA", "TORNTPHARM", "ZYDUSLIFE",
+                    "MANKIND", "ALKEM", "LAURUSLABS", "GLENMARK", "BIOCON", "IPCALAB", "AJANTPHARM", "ABBOTINDIA",
+                    "GLAXO", "PFIZER", "SANOFI", "ASTRAZEN", "NATCOPHARM", "GRANULES", "GLAND", "PPLPHARMA", "ERIS",
+                    "WOCKPHARMA", "STAR", "APLLTD", "FDC", "MARKSANS", "CAPLIPOINT", "JUBLPHARMA", "UNICHEMLAB",
+                    "INDOCO", "NEULANDLAB", "EMCURE", "ORCHPHARMA", "CONCORDBIO", "COHANCE", "AKUMS", "SENORES",
+                    "AARTIDRUGS", "AARTIPHARM", "SUPRIYA", "SYNGENE"],
+        "note": "Listed pharma and drug-making companies on NSE (explicit list): formulations, APIs and "
+                "CRDMO. Hospitals and diagnostics are excluded. STAR = Strides Pharma, APLLTD = Alembic "
+                "Pharmaceuticals, COHANCE = the former Suven Pharma.",
+    },
 }
 
 MIN_LIQUIDITY_CR = 0.5  # avg daily traded value below this (Rs crore) = thin, hard to build a position
