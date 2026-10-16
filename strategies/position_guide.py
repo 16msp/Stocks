@@ -295,7 +295,7 @@ def _technicals(hist: pd.DataFrame) -> dict:
     return out
 
 
-def fetch_market_stats(symbols: list[str], force: bool = False) -> pd.DataFrame:
+def fetch_market_stats(symbols: list[str], force: bool = False, update: bool = True) -> pd.DataFrame:
     """Per-symbol market stats computed from the local daily-price store
     (strategies/price_store.py), which is topped up with only the sessions that
     are new since the last run.
@@ -309,14 +309,15 @@ def fetch_market_stats(symbols: list[str], force: bool = False) -> pd.DataFrame:
 
     Uses last completed daily bars. Unresolved symbols or insufficient history
     give NaN for the affected fields. `force` re-checks Yahoo even if the store
-    looks current.
+    looks current; `update=False` skips the Yahoo top-up and uses the store as it is.
     """
     uniq = sorted({s for s in symbols if isinstance(s, str) and s})
     out = pd.DataFrame(index=pd.Index(uniq, name="Stock"), columns=RS_COLUMNS + TECH_COLUMNS + MARKET_EXTRA_COLUMNS, dtype=float)
     if not uniq:
         return out
 
-    price_store.update_prices(uniq + [NIFTY_TICKER], force=force)
+    if update:
+        price_store.update_prices(uniq + [NIFTY_TICKER], force=force)
     history = price_store.load_history(uniq + [NIFTY_TICKER])
 
     nifty_ret = {w: np.nan for w in RS_WINDOWS}
