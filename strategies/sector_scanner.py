@@ -126,6 +126,15 @@ SECTORS: dict[str, dict] = {
                 "(generators and equipment makers). Power-sector lenders (PFC, REC, IREDA) and the newly "
                 "demerged Vedanta units are left out. AEGISVOPAK = Aegis Vopak Terminals.",
     },
+    "Telecom": {
+        "symbols": ["BHARTIARTL", "BHARTIHEXA", "IDEA", "MTNL", "TTML", "INDUSTOWER", "GTLINFRA", "SUYOG",
+                    "TATACOMM", "RAILTEL", "NELCO", "ONMOBILE", "ITI", "HFCL", "STLTECH", "TEJASNET",
+                    "OPTIEMUS", "AVANTEL", "PARACABLES", "DEN", "HATHWAY", "GTPL"],
+        "note": "Listed telecom companies on NSE (explicit list): operators, tower companies, enterprise "
+                "connectivity, telecom equipment and optical-fibre makers, and cable broadband. Messaging "
+                "platforms such as Tanla and Route Mobile are in the IT sector. RCOM is left out "
+                "(insolvent).",
+    },
 }
 
 PRICE_BREAK = -0.35  # a one-day fall this big in the last year = probably a demerger, so the history is not comparable
