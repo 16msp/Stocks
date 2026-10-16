@@ -69,6 +69,17 @@ SECTORS: dict[str, dict] = {
                 "CRDMO. Hospitals and diagnostics are excluded. STAR = Strides Pharma, APLLTD = Alembic "
                 "Pharmaceuticals, COHANCE = the former Suven Pharma.",
     },
+    "FMCG": {
+        "symbols": ["HINDUNILVR", "ITC", "NESTLEIND", "BRITANNIA", "TATACONSUM", "DABUR", "GODREJCP", "MARICO",
+                    "COLPAL", "VBL", "PATANJALI", "EMAMILTD", "JYOTHYLAB", "HONASA", "BAJAJCON", "GILLETTE",
+                    "PGHL", "SANOFICONR", "ZYDUSWELL", "UBL", "UNITDSPR", "RADICO", "ABDL", "TI", "SULA",
+                    "GODFRYPHLP", "VSTIND", "BIKAJI", "BECTORFOOD", "GOPAL", "DIAMONDYD", "TASTYBITE", "ADFFOODS",
+                    "VADILALIND", "HATSUN", "HERITGFOOD", "DODLA", "PARAGMILK", "KRBL", "LTFOODS", "CCL"],
+        "note": "Listed FMCG companies on NSE (explicit list): household and personal care, packaged food, "
+                "dairy, beverages, liquor and tobacco. Edible-oil, sugar and restaurant companies are excluded. "
+                "PGHL = Procter & Gamble Health, SANOFICONR = Sanofi Consumer Healthcare, ABDL = Allied "
+                "Blenders, TI = Tilaknagar, DIAMONDYD = Prataap Snacks.",
+    },
 }
 
 MIN_LIQUIDITY_CR = 0.5  # avg daily traded value below this (Rs crore) = thin, hard to build a position
