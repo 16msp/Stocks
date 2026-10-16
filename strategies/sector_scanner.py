@@ -114,6 +114,18 @@ SECTORS: dict[str, dict] = {
                 "excluded, as are near-untradeable names (under Rs 0.5 cr a day). RUSTOMJEE = Keystone Realtors, MARATHON = Marathon Nextgen Realty, "
                 "SIGNATURE = Signatureglobal.",
     },
+    "Energy": {
+        "symbols": ["RELIANCE", "ONGC", "OIL", "BPCL", "IOC", "HINDPETRO", "MRPL", "CHENNPETRO", "GAIL",
+                    "PETRONET", "IGL", "MGL", "ATGL", "AEGISLOG", "AEGISVOPAK", "CASTROLIND", "GULFOILLUB",
+                    "HINDOILEXP", "DEEPINDS", "COALINDIA", "NTPC", "POWERGRID", "TATAPOWER", "ADANIPOWER",
+                    "JSWENERGY", "NHPC", "SJVN", "NLCINDIA", "TORNTPOWER", "CESC", "ADANIENSOL", "ADANIGREEN",
+                    "NTPCGREEN", "ACMESOLAR", "KPIGREEN", "SUZLON", "INOXWIND", "INOXGREEN", "WAAREEENER",
+                    "PREMIERENE", "IEX", "JPPOWER", "RPOWER"],
+        "note": "Listed energy companies on NSE (explicit list): oil and gas (producers, refiners, marketers, "
+                "gas distribution), coal, power generation, transmission and distribution, and renewables "
+                "(generators and equipment makers). Power-sector lenders (PFC, REC, IREDA) and the newly "
+                "demerged Vedanta units are left out. AEGISVOPAK = Aegis Vopak Terminals.",
+    },
 }
 
 PRICE_BREAK = -0.35  # a one-day fall this big in the last year = probably a demerger, so the history is not comparable
