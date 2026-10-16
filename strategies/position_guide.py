@@ -183,7 +183,9 @@ def _window_return(close: pd.Series, days: int) -> float:
 
 TECH_COLUMNS = ["52W High Drop", "vs 200DMA", "Vol Trend", "Up/Down Vol", "VP Low (VAL)", "VP POC", "VP High (VAH)", "Overhead Supply", "Supply to +25%",
                 "RSI 14", "Days Since Low", "Volatility Ratio", "Off 52W Low"]
-MARKET_EXTRA_COLUMNS = ["Last Close", "Avg Value 20D"]  # Avg Value 20D = avg daily traded value, Rs crore
+# Avg Value 20D = avg daily traded value, Rs crore; Worst 1D Move = biggest one-day close-to-close fall in the
+# last year (a -35% or worse day is normally a demerger / unadjusted corporate action, not a real crash)
+MARKET_EXTRA_COLUMNS = ["Last Close", "Avg Value 20D", "Worst 1D Move"]
 VP_BINS = 40
 VP_VALUE_AREA = 0.70
 VP_LOOKBACK = 126  # ~6 months of sessions
@@ -250,6 +252,7 @@ def _technicals(hist: pd.DataFrame) -> dict:
     year = hist.loc[hist.index >= hist.index[-1] - pd.Timedelta(days=365)]
     high_52w = float(year["Close"].max())
     out["52W High Drop"] = last / high_52w - 1.0
+    out["Worst 1D Move"] = float(year["Close"].pct_change().min())
     if len(close) >= 200:
         out["vs 200DMA"] = last / float(close.iloc[-200:].mean()) - 1.0
     if len(vol) >= 90 and vol.iloc[-90:].mean() > 0:

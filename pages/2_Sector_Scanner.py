@@ -35,6 +35,7 @@ REC_STYLES = {
     "Strong - wait for dip": MID,
     "Watch - base forming": MID,
     "Avoid for now": BAD,
+    "Price break - check": MID,
 }
 
 
@@ -110,11 +111,11 @@ st.header("Recommendations")
 st.caption(
     "**Accumulate** = down 20%+ from the 52W high, no fresh low for 20+ sessions, Buy Score 65+ and liquid enough to build a position. "
     "**Strong - wait for dip** = Buy Score 65+ but not at a discount. **Watch - base forming** = Buy Score 45-65 (or a good setup that is too thinly traded). "
-    "**Avoid for now** = Buy Score under 45, or making fresh lows. ⭐ = top 3 Accumulate calls by Buy Score."
+    "**Avoid for now** = Buy Score under 45, or making fresh lows. **Price break - check** = a one-day fall of 35%+ in the last year (usually a demerger Yahoo doesn't adjust for), so the numbers can't be trusted - check manually. ⭐ = top 3 Accumulate calls by Buy Score."
 )
 
 
-REC_ICON = {"Accumulate": "🟢", "Strong - wait for dip": "🟡", "Watch - base forming": "🟡", "Avoid for now": "🔴", "Insufficient data": "⚪"}
+REC_ICON = {"Accumulate": "🟢", "Strong - wait for dip": "🟡", "Watch - base forming": "🟡", "Avoid for now": "🔴", "Price break - check": "⚠️", "Insufficient data": "⚪"}
 
 
 def tradingview_url(symbol):
