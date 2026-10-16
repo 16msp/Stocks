@@ -104,6 +104,16 @@ SECTORS: dict[str, dict] = {
                 "are left out until they have enough price history. WELCORP = Welspun Corp, STEELXIND = Steel "
                 "Exchange India.",
     },
+    "Realty": {
+        "symbols": ["DLF", "GODREJPROP", "OBEROIRLTY", "PRESTIGE", "LODHA", "PHOENIXLTD", "BRIGADE", "SOBHA",
+                    "MAHLIFE", "ANANTRAJ", "SIGNATURE", "RUSTOMJEE", "KOLTEPATIL", "PURVA", "SUNTECK",
+                    "ARVSMART", "AJMERA", "RAYMONDREL", "TARC", "ASHIANA", "SURAJEST", "SHRIRAMPPS",
+                    "MAXESTATES", "ARKADE", "OMAXE", "MARATHON"],
+        "note": "Listed real-estate developers on NSE (explicit list): residential, commercial and mall "
+                "developers. Housing-finance companies, contractors and construction-materials makers are "
+                "excluded, as are near-untradeable names (under Rs 0.5 cr a day). RUSTOMJEE = Keystone Realtors, MARATHON = Marathon Nextgen Realty, "
+                "SIGNATURE = Signatureglobal.",
+    },
 }
 
 PRICE_BREAK = -0.35  # a one-day fall this big in the last year = probably a demerger, so the history is not comparable
