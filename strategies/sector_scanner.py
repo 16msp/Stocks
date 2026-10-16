@@ -135,6 +135,17 @@ SECTORS: dict[str, dict] = {
                 "platforms such as Tanla and Route Mobile are in the IT sector. RCOM is left out "
                 "(insolvent).",
     },
+    "Infrastructure": {
+        "symbols": ["LT", "NCC", "KEC", "KPIL", "IRB", "IRCON", "RVNL", "NBCC", "HCC", "PNCINFRA",
+                    "KNRCON", "AHLUCONT", "HGINFRA", "GRINFRA", "ASHOKA", "DBL", "JKIL", "PSPPROJECT",
+                    "CAPACITE", "AFCONS", "CEMPRO", "ENGINERSIN", "TECHNOE", "POWERMECH", "BAJEL",
+                    "TRANSRAILL", "TITAGARH", "JWL", "TEXRAIL", "RITES", "RAILTEL", "ADANIPORTS", "JSWINFRA",
+                    "GMRAIRPORT", "CONCOR", "GPPL", "RELINFRA"],
+        "note": "Listed infrastructure companies on NSE (explicit list): EPC and construction, roads and "
+                "highways, railway PSUs and wagon makers, power-transmission EPC, and ports, airports and "
+                "container logistics. Defence and shipbuilding, real-estate developers and infra lenders "
+                "(IRFC, HUDCO) are excluded. CEMPRO = Cemindia Projects, KPIL = Kalpataru Projects International.",
+    },
 }
 
 PRICE_BREAK = -0.35  # a one-day fall this big in the last year = probably a demerger, so the history is not comparable
