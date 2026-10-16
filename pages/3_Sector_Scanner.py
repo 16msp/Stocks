@@ -58,7 +58,13 @@ if "scan_nonce" not in st.session_state:
     st.session_state.scan_nonce = 0
 
 st.sidebar.header("Sector")
-sector = st.sidebar.selectbox("Sector", list(scanner.SECTORS), index=0)
+sector_names = list(scanner.SECTORS)
+if st.session_state.get("goto_sector") in sector_names:  # arrived by clicking a row on the Sector Overview
+    st.session_state["sector"] = st.session_state.pop("goto_sector")
+elif st.session_state.get("sector") not in sector_names:
+    st.session_state["sector"] = sector_names[0]
+sector = st.sidebar.selectbox("Sector", sector_names, key="sector")
+st.sidebar.page_link("pages/2_Sector_Overview.py", label="← All sectors overview")
 st.sidebar.caption(scanner.SECTORS[sector]["note"])
 if st.sidebar.button("🔄 Refresh universe + prices", type="primary", width="stretch"):
     st.session_state.scan_nonce += 1
