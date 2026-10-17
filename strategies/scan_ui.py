@@ -7,7 +7,7 @@ from urllib.parse import quote
 import pandas as pd
 import streamlit as st
 
-from strategies import favourites, paper_trades, price_store
+from strategies import favourites, market_trend, paper_trades, price_store
 from strategies.holdings_style import BAD, GOOD, MID
 
 FAV_ON, FAV_OFF = "❤️", "🤍"
@@ -208,6 +208,10 @@ def _plan_block(r, plan: dict) -> None:
         qty = plan.get("Qty", 0)
         lines.append(f"Position for your risk limit: **{qty} shares = ₹{plan['Invested']:,.0f}**, about ₹{plan['Max loss']:,.0f} lost if stopped ({plan['Sizing note']})"
                      if qty else f"Position size: none ({plan['Sizing note']})")
+    b50 = plan.get("Breadth 50")
+    if b50 is not None and not pd.isna(b50):
+        lines.append(f"Market today: Nifty {str(plan.get('Market state', '')).lower() or 'trend unknown'}; **{b50:.0%} of stocks above their 50-day average** "
+                     f"({'at or above' if b50 >= market_trend.BREADTH_MIN else 'below'} the {market_trend.BREADTH_MIN:.0%} the backtest favoured {'✔' if b50 >= market_trend.BREADTH_MIN else '✖'})")
     if plan.get("Results note"):
         lines.append(f"📅 {plan['Results note']}")
     st.caption("  \n".join(lines))

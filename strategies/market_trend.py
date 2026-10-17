@@ -37,3 +37,17 @@ def nifty_trend() -> dict:
     detail = (f"Nifty {last:,.0f} is {last / sma50 - 1:+.1%} vs its 50-day average and {last / sma200 - 1:+.1%} vs the 200-day average "
               f"({'rising' if rising else 'not rising'} over the last month), {last / high52 - 1:+.1%} from its 52-week high. As of {c.index[-1].date()}.")
     return {"state": state, "detail": detail, "last": last, "date": c.index[-1].date()}
+
+
+BREADTH_MIN = 0.70  # backtest: breakouts did best when at least this share of stocks were above their 50-day average
+
+
+def breadth(table: pd.DataFrame) -> dict:
+    """Share of stocks above their 50-day and 200-day averages, from a table with CMP, SMA 50 and SMA 200 columns (one row per stock).
+    Stocks without enough history for an average are left out of that average's share."""
+    out = {"stocks": int(table["CMP"].notna().sum())}
+    for key, col in (("above50", "SMA 50"), ("above200", "SMA 200")):
+        ok = table[col].notna() & table["CMP"].notna()
+        out[key] = float((table.loc[ok, "CMP"] > table.loc[ok, col]).mean()) if ok.any() else float("nan")
+    out["ok"] = bool(out["above50"] >= BREADTH_MIN)
+    return out

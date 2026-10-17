@@ -11,3 +11,4 @@ nse_etf_trend.csv
 nse_etf_weekly_volume.csv
 sector_universe_cache.json
 .streamlit/secrets.toml
+backtest_history.pkl
