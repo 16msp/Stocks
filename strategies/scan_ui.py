@@ -67,7 +67,7 @@ def _paper_buy(symbol: str, sector: str, price: float, signals: dict | None = No
         st.toast(f"Could not record the paper buy: {str(exc)[:140]}", icon="⚠️")
 
 
-PLAN_ICON = {"Broke out": "🟢", "Near pivot": "🟡", "Building": "⚪", "Extended": "🔴", "No data": "⚪"}
+PLAN_ICON = {"Broke out": "🟢", "Retesting": "🟡", "Near pivot": "🟡", "Building": "⚪", "Extended": "🔴", "No base": "⚪", "No data": "⚪"}
 REC_ICON = {"Accumulate": "🟢", "Strong - wait for dip": "🟡", "Watch - base forming": "🟡", "Avoid for now": "🔴", "Price break - check": "⚠️", "Insufficient data": "⚪"}
 
 
@@ -186,15 +186,25 @@ def _plan_block(r, plan: dict) -> None:
     if pd.isna(plan["Entry"]):
         return
     entry, stop = plan["Entry"], plan["Stop"]
-    qty = paper_trades.quantity_for(entry)
     a, b, c, d = st.columns(4)
     a.metric("Pivot (buy point)", f"₹{plan['Pivot']:,.2f}", f"{plan['To pivot']:+.1%} from the pivot", delta_color="off")
     b.metric("Entry / buy up to", f"₹{entry:,.2f}", f"up to ₹{plan['Buy up to']:,.2f}", delta_color="off")
-    c.metric("Stop", f"₹{stop:,.2f}", f"-{plan['Risk %']:.1%} from entry", delta_color="off", help=plan["Stop note"])
+    c.metric("Chart stop", f"₹{stop:,.2f}", f"-{plan['Risk %']:.1%} from entry", delta_color="off", help="Just under the low of the final pullback. Not capped: more than 10% away means skip.")
     d.metric("Targets (2x / 3x the risk)", f"₹{plan['Target 2R']:,.2f}", f"3x: ₹{plan['Target 3R']:,.2f}", delta_color="off")
-    loss = f" · if stopped on a ₹{paper_trades.BUDGET:,} buy ({qty} shares) you lose about ₹{qty * (entry - stop):,.0f}" if qty >= 1 else ""
-    vol_line = f" · breakout volume {plan['Breakout volume']}" if plan["Breakout volume"] else f" · needs {plan['Volume to confirm']:,.0f}+ shares on the breakout day (1.4x average)"
-    st.caption(
-        f"Pullbacks in the base: {plan['Contractions'] or 'none of 3%+'} ({'each one no deeper than the last ✔' if plan['Shrinking'] else 'not steadily shrinking ✖'}, {'final one tight ✔' if plan['Tightening'] else 'final one not tight ✖'}) · "
-        f"volume {'dried up ✔' if plan['Volume dried up'] else 'has not dried up ✖'}{vol_line}{loss}"
-    )
+    lines = [
+        f"Trade check: **{plan['Trade check']}**",
+        f"Base: {plan['Base weeks']:.0f} weeks, {plan['Base depth']:.0%} deep · pullbacks {plan['Contractions'] or 'none of 3%+'} "
+        f"({'last three not getting deeper ✔' if plan['Shrinking'] else 'last three not shrinking ✖'}, {'final one tight ✔' if plan['Tightening'] else 'final one not tight ✖'}) · "
+        f"volume {'dried up ✔' if plan['Volume dried up'] else 'has not dried up ✖'}",
+    ]
+    if plan["Breakout note"]:
+        lines.append(f"Breakout: {plan['Breakout note']} ({'good ✔' if plan['Breakout quality'] else 'weak ✖'})")
+    elif plan["Status"] in ("Near pivot", "Building"):
+        lines.append(f"To trigger: a move through the pivot on {plan['Volume to confirm']:,.0f}+ shares (1.4x average), closing in the top half of the day's range")
+    if plan.get("Sizing note") is not None and not pd.isna(plan.get("Sizing note")):
+        qty = plan.get("Qty", 0)
+        lines.append(f"Position for your risk limit: **{qty} shares = ₹{plan['Invested']:,.0f}**, about ₹{plan['Max loss']:,.0f} lost if stopped ({plan['Sizing note']})"
+                     if qty else f"Position size: none ({plan['Sizing note']})")
+    if plan.get("Results note"):
+        lines.append(f"📅 {plan['Results note']}")
+    st.caption("  \n".join(lines))
