@@ -88,7 +88,7 @@ def _sell(trade_id: str, symbol: str, buy_price: float, qty: int) -> None:
 
 trades["section"] = trades["strategy"].map(paper_trades.strategy_of)
 SIGNAL_NUM = [c for c in paper_trades.SIGNAL_FIELDS if c not in paper_trades.TEXT_SIGNALS and c != "Buy Score"]
-PCT_SIGNALS = {"52W High Drop", "Off 52W Low", "RS 1M", "RS 3M", "vs 200DMA", "Overhead Supply", "Supply to +25%", "vs POC", "Worst 1D Move"}
+PCT_SIGNALS = {"52W High Drop", "ATH Drop", "Off 52W Low", "RS 1M", "RS 3M", "vs 200DMA", "Overhead Supply", "Supply to +25%", "vs POC", "Worst 1D Move"}
 
 
 @st.cache_data(ttl=900, show_spinner=False)

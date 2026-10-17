@@ -186,7 +186,7 @@ with table_tab:
         cols = ["Stock", "Sector", "Status", "Trade check", "Verdict", "CMP", "Pivot", "Entry", "Buy up to", "Stop", "Risk %", "Qty", "Invested", "Max loss",
                 "Next results", "Target 2R", "Target 3R", "Base weeks", "Base depth", "Contractions", "Shrinking", "Tightening", "Volume dried up",
                 "Breakout quality", "Breakout note", "Volume to confirm", "Criteria met", "Missing", "RS Rating", "SMA 50", "SMA 150", "SMA 200", "200DMA up 4M",
-                "52W High Drop", "Off 52W Low", "vs 200DMA", "Volatility Ratio", "Vol Trend", "Up/Down Vol", "Avg Value 20D"]
+                "52W High Drop", "ATH Drop", "Off 52W Low", "vs 200DMA", "Volatility Ratio", "Vol Trend", "Up/Down Vol", "Avg Value 20D"]
         view = res[cols].copy()
         view.insert(1, "TradingView", view["Stock"].map(tradingview_url))
         view.insert(2, "Screener", view["Stock"].map(screener_url))
@@ -226,6 +226,7 @@ with table_tab:
                 "SMA 200": st.column_config.NumberColumn(format="%.2f"),
                 "200DMA up 4M": st.column_config.CheckboxColumn(help="The 200-day average is higher than it was 4 months ago (Minervini prefers 4-5 months)"),
                 "52W High Drop": st.column_config.NumberColumn(format="percent"),
+                "ATH Drop": st.column_config.NumberColumn(format="percent", help="From the all-time closing high (since listing). 0% = at its all-time high. Yahoo does not adjust for demergers, so a stock that demerged can show a bigger drop than a holder actually lost."),
                 "Off 52W Low": st.column_config.NumberColumn(format="percent", help="Bounce off the 52-week low"),
                 "vs 200DMA": st.column_config.NumberColumn(format="percent"),
                 "Volatility Ratio": st.column_config.NumberColumn(format="%.2fx", help="Below 0.85 = price range is contracting"),

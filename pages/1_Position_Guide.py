@@ -159,7 +159,7 @@ st.header(f"📋 Holdings — {len(stocks)} stock(s)")
 st.caption(
     "One row per stock you own (analysis fields only - sheet details are in the Exit / Add More sections below). "
     "**RS** = stock return minus Nifty return over 1M/3M (positive = beating Nifty). "
-    "**52W High Drop** / **vs 200DMA** = CMP vs 52-week closing high / 200-day average. "
+    "**52W High Drop** / **ATH Drop** / **vs 200DMA** = CMP vs 52-week closing high / all-time closing high / 200-day average. "
     "**Vol Trend** = 20-day avg volume / 90-day avg (>1x = interest rising). "
     "**Up/Down Vol** = volume on up-days / down-days, last 60 sessions (>1x = buyers dominate). "
     "**Volume profile** is built from the last ~6 months: POC = price with the most volume, VAL-VAH = zone holding 70% of it, "
@@ -219,6 +219,7 @@ st.dataframe(
     style_holdings(stocks[holdings_cols]),
     column_config={
         "52W High Drop": st.column_config.NumberColumn(format="percent"),
+        "ATH Drop": st.column_config.NumberColumn(format="percent", help="From the all-time closing high (since listing). 0% = at its all-time high. Yahoo does not adjust for demergers, so a stock that demerged can show a bigger drop than a holder actually lost."),
         "vs 200DMA": st.column_config.NumberColumn(format="percent"),
         "Vol Trend": st.column_config.NumberColumn(format="%.2fx"),
         "Up/Down Vol": st.column_config.NumberColumn(format="%.2fx"),

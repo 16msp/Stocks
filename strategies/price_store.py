@@ -287,6 +287,71 @@ def update_prices(symbols: list[str], force: bool = False, chunk_size: int = CHU
     return summary
 
 
+ATH_START = date(1990, 1, 1)
+ATH_REFRESH_DAYS = 7  # Yahoo re-adjusts old closes after splits and bonuses, so the stored all-time high is recomputed weekly
+
+
+def _ath_table(conn: _Db) -> None:
+    real = "DOUBLE PRECISION" if conn.is_pg else "REAL"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS stock_ath (symbol TEXT PRIMARY KEY, ath {real}, ath_date TEXT, checked_at TEXT)")
+    conn.commit()
+
+
+def update_ath(symbols: list[str], max_age_days: int = ATH_REFRESH_DAYS, chunk_size: int = CHUNK_SIZE) -> dict:
+    """All-time closing high of each symbol from Yahoo's full history (split/bonus-adjusted, like the stored closes).
+    Only symbols never checked, or checked more than `max_age_days` ago, are downloaded. Returns counts."""
+    uniq = sorted({s for s in symbols if isinstance(s, str) and s and not s.startswith("^")})
+    summary = {"requested": len(uniq), "updated": 0, "fresh": 0, "no_data": 0}
+    if not uniq:
+        return summary
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=max_age_days)).isoformat(timespec="seconds")
+    conn = _connect()
+    try:
+        _ath_table(conn)
+        checked = {s: c for s, c in conn.rows("SELECT symbol, checked_at FROM stock_ath")}
+    finally:
+        conn.close()
+    stale = [s for s in uniq if checked.get(s) is None or checked[s] < cutoff]
+    summary["fresh"] = len(uniq) - len(stale)
+    for i in range(0, len(stale), chunk_size):
+        chunk = stale[i:i + chunk_size]
+        got = _download(chunk, ATH_START, date.today())
+        rows = []
+        for s in chunk:
+            close = got[s]["Close"].dropna() if s in got else None
+            if close is None or close.empty:
+                summary["no_data"] += 1
+                continue
+            rows.append((s, float(close.max()), close.idxmax().strftime("%Y-%m-%d"), now.isoformat(timespec="seconds")))
+        if rows:
+            conn = _connect()
+            try:
+                for r in rows:
+                    conn.execute(
+                        "INSERT INTO stock_ath (symbol, ath, ath_date, checked_at) VALUES (?, ?, ?, ?) ON CONFLICT (symbol) DO UPDATE SET "
+                        "ath = EXCLUDED.ath, ath_date = EXCLUDED.ath_date, checked_at = EXCLUDED.checked_at", r)
+                conn.commit()
+            finally:
+                conn.close()
+            summary["updated"] += len(rows)
+    return summary
+
+
+def load_ath(symbols: list[str]) -> dict:
+    """{symbol: (all-time closing high, date)} for the symbols that have been checked (empty if the table does not exist yet)."""
+    uniq = sorted({s for s in symbols if isinstance(s, str) and s})
+    if not uniq:
+        return {}
+    conn = _connect()
+    try:
+        _ath_table(conn)
+        rows = conn.rows(f"SELECT symbol, ath, ath_date FROM stock_ath WHERE symbol IN ({','.join('?' * len(uniq))})", uniq)
+    finally:
+        conn.close()
+    return {s: (float(a), d) for s, a, d in rows if a is not None}
+
+
 def load_history(symbols: list[str]) -> dict[str, pd.DataFrame]:
     """{symbol: DataFrame[Open, High, Low, Close, Volume] indexed by date} from the store.
     High/Low far from that day's close are treated as bad prints and blanked (the day's

@@ -68,6 +68,7 @@ NUMERIC = {
     ],
     "Price vs high and low": [
         ("52W High Drop", "Drop from 52W high (%)", 100, 1, "%.0f%%", None, 0),
+        ("ATH Drop", "Drop from all-time high (%)", 100, 1, "%.0f%%", None, 0),
         ("Off 52W Low", "Bounce off 52W low (%)", 100, 1, "%.0f%%", 0, None),
         ("Days Since Low", "Days since 52W low (sessions)", 1, 1, "%.0f", 0, None),
         ("RSI 14", "RSI 14", 1, 1, "%.0f", 0, 100),
@@ -99,6 +100,8 @@ def _bounds(col, scale, step, hard_lo, hard_hi):
     return float(lo), float(hi)
 
 
+# a filter needs data: skip any indicator with no values yet (e.g. all-time highs before the first weekly refresh)
+NUMERIC = {g: [sp for sp in specs if sp[0] in data.columns and data[sp[0]].notna().any()] for g, specs in NUMERIC.items()}
 BOUNDS = {spec[0]: _bounds(*[spec[0], spec[2], spec[3], spec[5], spec[6]]) for group in NUMERIC.values() for spec in group}
 ALL_RECS = ["Accumulate", "Strong - wait for dip", "Watch - base forming", "Avoid for now", "Price break - check", "Insufficient data"]
 ALL_ZONES = ["Below value area", "At POC", "In value area", "Above value area"]
@@ -217,7 +220,7 @@ if res.empty:
 table_tab, cards_tab = st.tabs(["📊 Table", "🃏 Cards (top 30 by Buy Score)"])
 
 with table_tab:
-    cols = ["Stock", "Sector", "Recommendation", "Buy Score", "CMP", "52W High Drop", "Off 52W Low", "Days Since Low", "RSI 14",
+    cols = ["Stock", "Sector", "Recommendation", "Buy Score", "CMP", "52W High Drop", "ATH Drop", "Off 52W Low", "Days Since Low", "RSI 14",
             "RS 1M", "RS 3M", "vs 200DMA", "Vol Trend", "Up/Down Vol", "Overhead Supply", "Supply to +25%",
             "Volatility Ratio", "vs POC", "VP Zone", "Avg Value 20D", "Owned", "Why"]
     view = res[[c for c in cols if c in res.columns]].copy()
@@ -236,6 +239,7 @@ with table_tab:
             "Buy Score": st.column_config.NumberColumn(format="%.0f"),
             "CMP": st.column_config.NumberColumn(format="%.2f"),
             "52W High Drop": st.column_config.NumberColumn(format="percent"),
+            "ATH Drop": st.column_config.NumberColumn(format="percent", help="From the all-time closing high (since listing). 0% = at its all-time high. Yahoo does not adjust for demergers, so a stock that demerged can show a bigger drop than a holder actually lost."),
             "Off 52W Low": st.column_config.NumberColumn(format="percent", help="Bounce off the 52-week low"),
             "Days Since Low": st.column_config.NumberColumn(format="%.0f"),
             "RSI 14": st.column_config.NumberColumn(format="%.0f"),
