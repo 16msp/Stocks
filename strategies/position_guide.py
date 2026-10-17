@@ -181,7 +181,7 @@ def _window_return(close: pd.Series, days: int) -> float:
     return float(close.iloc[-1] / base.iloc[-1] - 1.0)
 
 
-TECH_COLUMNS = ["52W High Drop", "vs 200DMA", "Vol Trend", "Up/Down Vol", "VP Low (VAL)", "VP POC", "VP High (VAH)", "Overhead Supply", "Supply to +25%",
+TECH_COLUMNS = ["52W High Drop", "ATH Drop", "vs 200DMA", "Vol Trend", "Up/Down Vol", "VP Low (VAL)", "VP POC", "VP High (VAH)", "Overhead Supply", "Supply to +25%",
                 "RSI 14", "Days Since Low", "Volatility Ratio", "Off 52W Low"]
 # Avg Value 20D = avg daily traded value, Rs crore; Worst 1D Move = biggest one-day close-to-close fall in the
 # last year (a -35% or worse day is normally a demerger / unadjusted corporate action, not a real crash)
@@ -318,7 +318,7 @@ def fetch_market_stats(symbols: list[str], force: bool = False, update: bool = T
 
     - RS 1M/3M: relative strength vs Nifty 50 = stock return minus Nifty
       return over the window (return fractions; positive = beating Nifty).
-    - 52W High Drop, vs 200DMA, Vol Trend (20d vs 90d avg volume), Up/Down Vol
+    - 52W High Drop, ATH Drop (vs the all-time closing high kept by price_store.update_ath), vs 200DMA, Vol Trend (20d vs 90d avg volume), Up/Down Vol
       (volume on up days / down days, last 60 sessions), RSI, stabilisation and
       volatility fields - see _technicals.
     - Volume profile (VAL / POC / VAH, overhead supply) over the last ~6 months.
@@ -335,6 +335,10 @@ def fetch_market_stats(symbols: list[str], force: bool = False, update: bool = T
     if update:
         price_store.update_prices(uniq + [NIFTY_TICKER], force=force)
     history = price_store.load_history(uniq + [NIFTY_TICKER])
+    try:
+        ath = price_store.load_ath(uniq)  # all-time closing highs, refreshed weekly by the daily job
+    except Exception:
+        ath = {}
 
     nifty_ret = {w: np.nan for w in RS_WINDOWS}
     if NIFTY_TICKER in history:
@@ -349,6 +353,9 @@ def fetch_market_stats(symbols: list[str], force: bool = False, update: bool = T
             out.loc[sym, f"RS {w}"] = _window_return(hist["Close"], d) - nifty_ret[w]
         for k, v in _technicals(hist).items():
             out.loc[sym, k] = v
+        if sym in ath:  # the stored high may be a few days old: a newer high in the price store wins
+            top = max(ath[sym][0], float(hist["Close"].max()))
+            out.loc[sym, "ATH Drop"] = float(hist["Close"].dropna().iloc[-1]) / top - 1.0
     return out
 
 

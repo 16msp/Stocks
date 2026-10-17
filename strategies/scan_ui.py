@@ -149,6 +149,7 @@ def render_card(r, sector: str = "", key_prefix: str = "card", plan: dict | None
         with body:
             st.markdown(
                 f"**CMP ₹{_fmt(r['CMP'], 'px')}** &nbsp;|&nbsp; 52W high drop **{_fmt(r['52W High Drop'], 'pct0')}** "
+                f"&nbsp;|&nbsp; ATH drop **{_fmt(r.get('ATH Drop'), 'pct0')}** "
                 f"&nbsp;|&nbsp; bounce off low **{_fmt(r['Off 52W Low'], 'pct0')}** &nbsp;|&nbsp; RSI **{_fmt(r['RSI 14'], 'int')}**"
             )
             st.markdown(

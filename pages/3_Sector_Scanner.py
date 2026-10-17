@@ -126,7 +126,7 @@ with cards_tab:
     for _, row in t.iterrows():
         render_card(row, sector)
 with table_tab:
-    cols = ["Pick", "Stock", "Company", "Owned", "Recommendation", "Buy Score", "Why", "CMP", "52W High Drop", "RS 1M", "RS 3M",
+    cols = ["Pick", "Stock", "Company", "Owned", "Recommendation", "Buy Score", "Why", "CMP", "52W High Drop", "ATH Drop", "RS 1M", "RS 3M",
             "vs 200DMA", "Vol Trend", "Up/Down Vol", "Overhead Supply", "Supply to +25%", "RSI 14", "Days Since Low",
             "Volatility Ratio", "Off 52W Low", "vs POC", "VP Zone", "Avg Value 20D"]
     cols = [c for c in cols if c in t.columns]
@@ -149,6 +149,7 @@ with table_tab:
             "CMP": st.column_config.NumberColumn(format="%.2f", help="Last completed daily close"),
             "Buy Score": st.column_config.NumberColumn(format="%.0f"),
             "52W High Drop": st.column_config.NumberColumn(format="percent"),
+            "ATH Drop": st.column_config.NumberColumn(format="percent", help="From the all-time closing high (since listing). 0% = at its all-time high. Yahoo does not adjust for demergers, so a stock that demerged can show a bigger drop than a holder actually lost."),
             "RS 1M": st.column_config.NumberColumn(format="percent"),
             "RS 3M": st.column_config.NumberColumn(format="percent"),
             "vs 200DMA": st.column_config.NumberColumn(format="percent"),

@@ -42,6 +42,10 @@ def main() -> int:
 
     summary = price_store.update_prices(sorted(symbols), force=args.force)
     print("Update summary:", summary)
+    try:
+        print("All-time highs:", price_store.update_ath(sorted(symbols)))
+    except Exception as exc:  # the prices are the important part
+        print(f"Could not update the all-time highs: {exc}")
     print("Store status:", price_store.get_status(sorted(symbols)))
     fetched = summary["new"] + summary["incremental"] + summary["resynced"] + summary["up_to_date"]
     return 0 if fetched > 0 else 1
