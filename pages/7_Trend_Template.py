@@ -243,7 +243,7 @@ with cards_tab:
         card["Pick"] = ""
         card["Owned"] = ""
         render_card(card, str(row["Sector"]).split(", ")[0], key_prefix="ttcard",
-                    plan={**row[entry_plan.COLUMNS].to_dict(), **row[["Qty", "Invested", "Max loss", "Sizing note", "Results note"]].to_dict()})
+                    plan={**row[entry_plan.COLUMNS].to_dict(), **row[["Qty", "Invested", "Max loss", "Sizing note", "Results note"]].to_dict(), "Market state": mkt["state"]})
 
 with st.expander("How the trade plan is worked out"):
     st.markdown(

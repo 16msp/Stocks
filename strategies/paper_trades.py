@@ -17,16 +17,18 @@ import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
+import numpy as np
 import pandas as pd
 
 from strategies import price_store
 
 BUDGET = 50_000  # rupees per transaction
 MAX_POSITIONS_PER_STOCK = 3  # open positions allowed in one stock at a time
+GENERAL, MINERVINI = "general", "minervini"  # which page a trade came from: the scanner/screener cards, or the Trend Template cards
 SAME_STOCK_SECONDS = 60  # the same stock cannot be bought twice within this many seconds
 MAX_BUYS_PER_MINUTE = 5  # across all stocks
 
-COLUMNS = ["id", "symbol", "sector", "qty", "buy_price", "buy_date", "buy_session", "sell_price", "sell_date", "sell_session", "signals", "created_at"]
+COLUMNS = ["id", "symbol", "sector", "qty", "buy_price", "buy_date", "buy_session", "sell_price", "sell_date", "sell_session", "signals", "created_at", "strategy"]
 
 # Scan-table column -> short label, in the order shown on the card. Numbers stay numbers; the text ones are labels.
 SIGNAL_FIELDS = {
@@ -51,6 +53,28 @@ def snapshot(row) -> dict:
         else:
             out[col] = round(float(v), 4)
     return out
+
+
+PLAN_FIELDS = ["Status", "Trade check", "Market state", "Pivot", "Entry", "Stop", "Risk %", "Target 2R", "Target 3R", "Base weeks", "Base depth",
+               "Contractions", "Shrinking", "Tightening", "Volume dried up", "Breakout quality"]
+
+
+def plan_snapshot(plan) -> dict:
+    """The Trend Template trade plan (pivot, stop, targets, status, market state...) as a plain dict for storing with a Minervini buy."""
+    out = {}
+    for k in PLAN_FIELDS:
+        v = plan.get(k) if hasattr(plan, "get") else None
+        if v is None or (not isinstance(v, (str, bool, np.bool_)) and pd.isna(v)):
+            out[k] = None
+        elif isinstance(v, (str, bool, np.bool_)):
+            out[k] = v if isinstance(v, str) else bool(v)
+        else:
+            out[k] = round(float(v), 4)
+    return out
+
+
+def strategy_of(value) -> str:
+    return MINERVINI if value == MINERVINI else GENERAL  # older trades have no value: they came from the scanner / screener / buy box
 
 
 def parse_signals(text) -> dict:
@@ -78,15 +102,16 @@ def _db():
         f"""CREATE TABLE IF NOT EXISTS paper_trades (
             id TEXT PRIMARY KEY, symbol TEXT NOT NULL, sector TEXT, qty INTEGER NOT NULL,
             buy_price {real} NOT NULL, buy_date TEXT NOT NULL, buy_session TEXT,
-            sell_price {real}, sell_date TEXT, sell_session TEXT, signals TEXT, created_at TEXT)"""
+            sell_price {real}, sell_date TEXT, sell_session TEXT, signals TEXT, created_at TEXT, strategy TEXT)"""
     )
     # columns added after the first release: trades made before them simply have no value
     if db.is_pg:
         db.execute("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS signals TEXT")
         db.execute("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS created_at TEXT")
+        db.execute("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS strategy TEXT")
     else:
         have = [r[1] for r in db.rows("PRAGMA table_info(paper_trades)")]
-        for col in ("signals", "created_at"):
+        for col in ("signals", "created_at", "strategy"):
             if col not in have:
                 db.execute(f"ALTER TABLE paper_trades ADD COLUMN {col} TEXT")
     db.commit()
@@ -113,7 +138,7 @@ def open_counts() -> dict:
     return {sym: int(n) for sym, n in rows}
 
 
-def buy(symbol: str, sector: str, price: float, session: str | None, signals: dict | None = None) -> int:
+def buy(symbol: str, sector: str, price: float, session: str | None, signals: dict | None = None, strategy: str = GENERAL) -> int:
     """Record a buy at `price`, with the technicals snapshot; returns the number of shares. Raises ValueError if even one share is too dear."""
     qty = quantity_for(price)
     if qty < 1:
@@ -131,9 +156,9 @@ def buy(symbol: str, sector: str, price: float, session: str | None, signals: di
         if db.rows("SELECT COUNT(*) FROM paper_trades WHERE created_at >= ?", (minute_cut,))[0][0] >= MAX_BUYS_PER_MINUTE:
             raise ValueError(f"{MAX_BUYS_PER_MINUTE} buys were already made in the last minute. Wait a moment, then try again.")
         db.execute(
-            "INSERT INTO paper_trades (id, symbol, sector, qty, buy_price, buy_date, buy_session, signals, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO paper_trades (id, symbol, sector, qty, buy_price, buy_date, buy_session, signals, created_at, strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (uuid.uuid4().hex, symbol, sector, qty, round(float(price), 2), date.today().isoformat(), session,
-             json.dumps(signals) if signals else None, now.isoformat(timespec="seconds")),
+             json.dumps(signals) if signals else None, now.isoformat(timespec="seconds"), MINERVINI if strategy == MINERVINI else GENERAL),
         )
         db.commit()
     finally:
@@ -148,6 +173,16 @@ def sell(trade_id: str, price: float, session: str | None) -> None:
             "UPDATE paper_trades SET sell_price = ?, sell_date = ?, sell_session = ? WHERE id = ? AND sell_price IS NULL",
             (round(float(price), 2), date.today().isoformat(), session, trade_id),
         )
+        db.commit()
+    finally:
+        db.close()
+
+
+def set_strategy(trade_id: str, strategy: str) -> None:
+    """Move a trade to the other section."""
+    db = _db()
+    try:
+        db.execute("UPDATE paper_trades SET strategy = ? WHERE id = ?", (MINERVINI if strategy == MINERVINI else GENERAL, trade_id))
         db.commit()
     finally:
         db.close()

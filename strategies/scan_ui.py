@@ -57,12 +57,13 @@ def latest_session(symbol: str):
         return None
 
 
-def _paper_buy(symbol: str, sector: str, price: float, signals: dict | None = None) -> None:
+def _paper_buy(symbol: str, sector: str, price: float, signals: dict | None = None, strategy: str = paper_trades.GENERAL) -> None:
     try:
-        qty = paper_trades.buy(symbol, sector, price, latest_session(symbol), signals)
+        qty = paper_trades.buy(symbol, sector, price, latest_session(symbol), signals, strategy)
         counts = paper_open_counts()
         counts[symbol] = counts.get(symbol, 0) + 1
-        st.toast(f"Paper bought {qty} x {symbol} at ₹{price:,.2f} = ₹{qty * price:,.0f}. See the Paper Trades page.", icon="🛒")
+        where = "the Minervini section of the Paper Trades page" if strategy == paper_trades.MINERVINI else "the Paper Trades page"
+        st.toast(f"Paper bought {qty} x {symbol} at ₹{price:,.2f} = ₹{qty * price:,.0f}. See {where}.", icon="🛒")
     except Exception as exc:
         st.toast(f"Could not record the paper buy: {str(exc)[:140]}", icon="⚠️")
 
@@ -133,7 +134,9 @@ def render_card(r, sector: str = "", key_prefix: str = "card", plan: dict | None
                 disabled=full or qty < 1,
                 help=tip,
                 on_click=_paper_buy,
-                args=(r["Stock"], sector or r.get("Sector", ""), price, paper_trades.snapshot(r)),
+                args=(r["Stock"], sector or r.get("Sector", ""), price,
+                      {**paper_trades.snapshot(r), "plan": paper_trades.plan_snapshot(plan)} if plan else paper_trades.snapshot(r),
+                      paper_trades.MINERVINI if plan else paper_trades.GENERAL),
             )
             st.caption(r["Company"])
             st.markdown(f"[📈 TradingView]({tradingview_url(r['Stock'])}) &nbsp;·&nbsp; [📊 Screener]({screener_url(r['Stock'])})")
