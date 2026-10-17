@@ -4,11 +4,14 @@ Rules, kept deliberately simple:
 - one buy spends at most BUDGET rupees: shares = floor(BUDGET / price), so the amount never goes above it;
 - up to MAX_POSITIONS_PER_STOCK open positions per stock (each sells separately);
 - trades execute at the last completed daily close from the price store (no live quotes);
-- no brokerage, taxes or slippage; a sell closes the whole position.
+- no brokerage, taxes or slippage; a sell closes the whole position;
+- every buy also stores a snapshot of the card's technicals (SIGNAL_FIELDS) so that, months later, the trades can be
+  compared with how they turned out.
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date
 
@@ -19,7 +22,42 @@ from strategies import price_store
 BUDGET = 50_000  # rupees per transaction
 MAX_POSITIONS_PER_STOCK = 3  # open positions allowed in one stock at a time
 
-COLUMNS = ["id", "symbol", "sector", "qty", "buy_price", "buy_date", "buy_session", "sell_price", "sell_date", "sell_session"]
+COLUMNS = ["id", "symbol", "sector", "qty", "buy_price", "buy_date", "buy_session", "sell_price", "sell_date", "sell_session", "signals"]
+
+# Scan-table column -> short label, in the order shown on the card. Numbers stay numbers; the text ones are labels.
+SIGNAL_FIELDS = {
+    "Recommendation": "Recommendation", "Buy Score": "Buy Score", "52W High Drop": "52W high drop", "Off 52W Low": "Bounce off low",
+    "RSI 14": "RSI", "RS 1M": "RS 1M", "RS 3M": "RS 3M", "vs 200DMA": "vs 200DMA", "Up/Down Vol": "Up/Down vol",
+    "Vol Trend": "Vol trend", "Days Since Low": "Days since low", "Overhead Supply": "Overhead supply",
+    "Supply to +25%": "Supply to +25%", "Volatility Ratio": "Volatility", "VP Zone": "Volume-profile zone",
+    "vs POC": "vs POC", "Avg Value 20D": "Avg traded Cr/day", "Worst 1D Move": "Worst 1-day move", "Why": "Why (card text)",
+}
+TEXT_SIGNALS = {"Recommendation", "VP Zone", "Why"}
+
+
+def snapshot(row) -> dict:
+    """The card's technicals as a plain dict (NaN -> None) for storing with a buy. `row` is a scan-table row."""
+    out = {}
+    for col in SIGNAL_FIELDS:
+        v = row.get(col) if hasattr(row, "get") else None
+        if v is None or (not isinstance(v, str) and pd.isna(v)):
+            out[col] = None
+        elif col in TEXT_SIGNALS:
+            out[col] = str(v)
+        else:
+            out[col] = round(float(v), 4)
+    return out
+
+
+def parse_signals(text) -> dict:
+    """Stored JSON back to a dict ({} for trades bought before snapshots existed, or unreadable text)."""
+    if not isinstance(text, str) or not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def quantity_for(price) -> int:
@@ -36,8 +74,13 @@ def _db():
         f"""CREATE TABLE IF NOT EXISTS paper_trades (
             id TEXT PRIMARY KEY, symbol TEXT NOT NULL, sector TEXT, qty INTEGER NOT NULL,
             buy_price {real} NOT NULL, buy_date TEXT NOT NULL, buy_session TEXT,
-            sell_price {real}, sell_date TEXT, sell_session TEXT)"""
+            sell_price {real}, sell_date TEXT, sell_session TEXT, signals TEXT)"""
     )
+    # trades recorded before snapshots existed: add the column once (they simply have no snapshot)
+    if db.is_pg:
+        db.execute("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS signals TEXT")
+    elif "signals" not in [r[1] for r in db.rows("PRAGMA table_info(paper_trades)")]:
+        db.execute("ALTER TABLE paper_trades ADD COLUMN signals TEXT")
     db.commit()
     return db
 
@@ -62,8 +105,8 @@ def open_counts() -> dict:
     return {sym: int(n) for sym, n in rows}
 
 
-def buy(symbol: str, sector: str, price: float, session: str | None) -> int:
-    """Record a buy at `price`; returns the number of shares. Raises ValueError if even one share is too dear."""
+def buy(symbol: str, sector: str, price: float, session: str | None, signals: dict | None = None) -> int:
+    """Record a buy at `price`, with the technicals snapshot; returns the number of shares. Raises ValueError if even one share is too dear."""
     qty = quantity_for(price)
     if qty < 1:
         raise ValueError(f"{symbol} at Rs {price:,.2f} is more than the Rs {BUDGET:,} limit for one share.")
@@ -73,8 +116,9 @@ def buy(symbol: str, sector: str, price: float, session: str | None) -> int:
         if held >= MAX_POSITIONS_PER_STOCK:
             raise ValueError(f"You already hold {held} open positions in {symbol} (maximum {MAX_POSITIONS_PER_STOCK}). Sell one first.")
         db.execute(
-            "INSERT INTO paper_trades (id, symbol, sector, qty, buy_price, buy_date, buy_session) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (uuid.uuid4().hex, symbol, sector, qty, round(float(price), 2), date.today().isoformat(), session),
+            "INSERT INTO paper_trades (id, symbol, sector, qty, buy_price, buy_date, buy_session, signals) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (uuid.uuid4().hex, symbol, sector, qty, round(float(price), 2), date.today().isoformat(), session,
+             json.dumps(signals) if signals else None),
         )
         db.commit()
     finally:

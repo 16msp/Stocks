@@ -57,9 +57,9 @@ def latest_session(symbol: str):
         return None
 
 
-def _paper_buy(symbol: str, sector: str, price: float) -> None:
+def _paper_buy(symbol: str, sector: str, price: float, signals: dict | None = None) -> None:
     try:
-        qty = paper_trades.buy(symbol, sector, price, latest_session(symbol))
+        qty = paper_trades.buy(symbol, sector, price, latest_session(symbol), signals)
         counts = paper_open_counts()
         counts[symbol] = counts.get(symbol, 0) + 1
         st.toast(f"Paper bought {qty} x {symbol} at ₹{price:,.2f} = ₹{qty * price:,.0f}. See the Paper Trades page.", icon="🛒")
@@ -130,7 +130,7 @@ def render_card(r, sector: str = "", key_prefix: str = "card"):
                 disabled=full or qty < 1,
                 help=tip,
                 on_click=_paper_buy,
-                args=(r["Stock"], sector or r.get("Sector", ""), price),
+                args=(r["Stock"], sector or r.get("Sector", ""), price, paper_trades.snapshot(r)),
             )
             st.caption(r["Company"])
             st.markdown(f"[📈 TradingView]({tradingview_url(r['Stock'])}) &nbsp;·&nbsp; [📊 Screener]({screener_url(r['Stock'])})")
