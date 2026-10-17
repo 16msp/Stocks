@@ -7,6 +7,8 @@ import pandas as pd
 import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
+from strategies import entry_plan  # noqa: E402
+from strategies import price_store  # noqa: E402
 from strategies import sector_scanner as scanner  # noqa: E402
 from strategies import trend_template as tt  # noqa: E402
 from strategies.scan_all import scan_all_sectors  # noqa: E402
@@ -31,6 +33,15 @@ if st.sidebar.button("🔄 Recalculate", width="stretch"):
     st.session_state.trend_nonce += 1
     scan_all_sectors.clear()
 
+@st.cache_data(ttl=3600, show_spinner="Working out buy points and stops...")
+def _plans(symbols: tuple, nonce: int) -> pd.DataFrame:
+    hist = price_store.load_history(list(symbols))
+    rows = [{"Stock": s, **(entry_plan.plan(hist[s]) if s in hist else entry_plan.EMPTY)} for s in symbols]
+    return pd.DataFrame(rows).set_index("Stock")
+
+
+STATUS_ORDER = {"Broke out": 0, "Near pivot": 1, "Building": 2, "Extended": 3, "No data": 4}
+
 full, _summaries = scan_all_sectors(st.session_state.trend_nonce)
 if "SMA 200" not in full.columns:
     st.error("The stored scan has no moving-average columns yet. Press **Recalculate** in the sidebar.")
@@ -52,11 +63,12 @@ evaluated = tt.evaluate(data, near_high=near_high, above_low=above_low, min_rs=m
 judged = evaluated[evaluated["Criteria met"].notna()].copy()
 no_history = len(evaluated) - len(judged)
 
-f1, f2, f3, f4 = st.columns([1.3, 2, 1.3, 1.3])
+f1, f2, f3, f4, f5 = st.columns([1.1, 1.8, 1.2, 1.3, 1.6])
 need = f1.selectbox("Criteria to meet", [8, 7, 6, 5], format_func=lambda n: f"All 8" if n == 8 else f"At least {n} of 8", index=0)
 sectors = f2.multiselect("Sectors", sorted(scanner.SECTORS), placeholder="All sectors")
 hide_thin = f3.checkbox(f"Hide thinly traded (< ₹{scanner.MIN_LIQUIDITY_CR} cr/day)", value=True)
-tight_only = f4.checkbox("Only volatility-contracting (VCP-style)", value=False, help="Average true range over the last 20 sessions is below 85% of its 100-session average.")
+tight_only = f4.checkbox("Only volatility-contracting (VCP-style)", value=False, help="Average true range over the last 20 sessions is below 85% of its 100-session average. This checks the tightening of daily ranges only; read the Trade plan on each card for the actual base.")
+setup = f5.multiselect("Setup status", ["Broke out", "Near pivot", "Building", "Extended"], placeholder="Any status", help="Broke out: through the pivot, within 5%. Near pivot: within 3% below it. Building: further below. Extended: more than 5% above the pivot.")
 
 res = judged[judged["Criteria met"] >= need]
 res = res[res["Recommendation"] != "Price break - check"]
@@ -66,7 +78,14 @@ if sectors:
     res = res[res["Sector"].map(lambda s: any(x in sectors for x in s.split(", ")))]
 if tight_only:
     res = res[res["Volatility Ratio"] < 0.85]
-res = res.sort_values(["Criteria met", "RS Rating"], ascending=[False, False])
+plans = _plans(tuple(sorted(res["Stock"])), st.session_state.trend_nonce) if len(res) else pd.DataFrame(columns=entry_plan.COLUMNS)
+res = res.join(plans, on="Stock")
+if setup:
+    res = res[res["Status"].isin(setup)]
+res = res.assign(_s=res["Status"].map(STATUS_ORDER)).sort_values(["_s", "Criteria met", "RS Rating"], ascending=[True, False, False]).drop(columns="_s")
+res["Template why"] = res.apply(
+    lambda r: "✔ " + "; ".join(tt.CRITERIA[c] for c in tt.CRITERIA if r[c]) + (" | ✖ " + r["Missing"].replace(", ", "; ") if r["Missing"] else ""), axis=1,
+) if len(res) else pd.Series(dtype=str)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Stocks judged", len(judged), help="Needs about 10 months of stored prices to work out the 200-day average and its 1-month trend.")
@@ -88,17 +107,30 @@ with table_tab:
     if res.empty:
         st.info("No stocks fit with these settings. Try 'At least 7 of 8', which also lists the one condition each is missing.")
     else:
-        cols = ["Stock", "Sector", "Criteria met", "Missing", "RS Rating", "CMP", "SMA 50", "SMA 150", "SMA 200", "200DMA up 4M", "52W High Drop",
-                "Off 52W Low", "vs 200DMA", "Volatility Ratio", "Vol Trend", "Up/Down Vol", "Avg Value 20D", "Recommendation", "Buy Score"]
+        cols = ["Stock", "Sector", "Status", "Verdict", "CMP", "Pivot", "Entry", "Buy up to", "Stop", "Risk %", "Target 2R", "Target 3R", "Contractions",
+                "Tightening", "Volume dried up", "Volume to confirm", "Criteria met", "Missing", "RS Rating", "SMA 50", "SMA 150", "SMA 200", "200DMA up 4M",
+                "52W High Drop", "Off 52W Low", "vs 200DMA", "Volatility Ratio", "Vol Trend", "Up/Down Vol", "Avg Value 20D"]
         view = res[cols].copy()
         view.insert(1, "TradingView", view["Stock"].map(tradingview_url))
         view.insert(2, "Screener", view["Stock"].map(screener_url))
-        st.caption("Sorted by conditions met, then RS rating (click a header to re-sort, or use the table's search icon). 'Missing' lists the conditions a stock fails.")
+        st.caption("Sorted by setup status (broke out first), then conditions met and RS rating. Click a header to re-sort, or use the table's search icon. "
+                   "Entry, stop and targets follow the rules explained under 'How the trade plan is worked out' below.")
         st.dataframe(
             view,
             column_config={
                 "TradingView": st.column_config.LinkColumn("TradingView", display_text="📈 Chart"),
                 "Screener": st.column_config.LinkColumn("Screener", display_text="📊 Screener"),
+                "Verdict": st.column_config.TextColumn(width="large"),
+                "Pivot": st.column_config.NumberColumn(format="%.2f", help="The buy point: the high the stock has to trade through"),
+                "Entry": st.column_config.NumberColumn(format="%.2f"),
+                "Buy up to": st.column_config.NumberColumn(format="%.2f", help="Pivot + 5%. Above this the move is extended: don't chase."),
+                "Stop": st.column_config.NumberColumn(format="%.2f", help="Under the 15-session low, never more than 8% below the entry"),
+                "Risk %": st.column_config.NumberColumn(format="percent", help="Entry to stop"),
+                "Target 2R": st.column_config.NumberColumn(format="%.2f", help="Entry + 2x the risk"),
+                "Target 3R": st.column_config.NumberColumn(format="%.2f", help="Entry + 3x the risk"),
+                "Tightening": st.column_config.CheckboxColumn(help="The last pullback is under 8% and well under the biggest one"),
+                "Volume dried up": st.column_config.CheckboxColumn(help="Average volume of the last 10 sessions is below 80% of the 50-day average"),
+                "Volume to confirm": st.column_config.NumberColumn(format="%.0f", help="1.4x the 50-day average volume: the breakout day should trade at least this many shares"),
                 "Criteria met": st.column_config.NumberColumn(format="%.0f / 8"),
                 "Missing": st.column_config.TextColumn(width="medium"),
                 "RS Rating": st.column_config.NumberColumn(format="%.0f", help="1-99 against the stocks in these sector lists"),
@@ -130,9 +162,24 @@ with table_tab:
 with cards_tab:
     if len(res) > 30:
         st.caption(f"Showing the top 30 of {len(res)} matches; narrow the filters or use the Table tab for the rest.")
-    top = res.sort_values(["RS Rating", "Criteria met"], ascending=False).head(30)
-    for _, row in top.iterrows():
+    for _, row in res.head(30).iterrows():
         card = row.copy()
         card["Pick"] = ""
         card["Owned"] = ""
-        render_card(card, str(row["Sector"]).split(", ")[0], key_prefix="ttcard")
+        render_card(card, str(row["Sector"]).split(", ")[0], key_prefix="ttcard", plan=row[entry_plan.COLUMNS].to_dict())
+
+with st.expander("How the trade plan is worked out"):
+    st.markdown(
+        f"""
+- **Pivot (buy point):** the highest high of the last {entry_plan.BASE_SESSIONS} sessions (about 13 weeks). If the stock has already closed through the earlier highs in the last
+  {entry_plan.BREAKOUT_LOOKBACK} sessions, the pivot is the high it broke through.
+- **Entry:** just above the pivot (+0.1%); for a stock that has broken out already, today's close while it is within 5% of the pivot.
+- **Buy up to:** pivot + {entry_plan.CHASE_LIMIT:.0%}. Beyond that the stock is *extended*: Minervini says wait for a new base.
+- **Stop:** under the lowest low of the {entry_plan.STOP_LOOKBACK} sessions before the breakout (or before today if it has not broken out), and never more than {entry_plan.MAX_RISK:.0%} below the entry.
+  His rule is to cut losses at 7-8%, so if the chart's own low is further away the stop is capped and the setup is shown with an 8% risk.
+- **Targets:** entry + 2 or 3 times the risk. A breakout that does not run at least that far is a poor trade; many winners are held much longer.
+- **Volume:** the base should show volume drying up, and the breakout day should trade at least {entry_plan.BREAKOUT_VOL_X}x the 50-day average ("Volume to confirm").
+- **Tightening:** the last pullback of {entry_plan.MIN_SWING:.0%}+ is under 8% and no more than 60% of the biggest pullback in the base.
+- **Not covered:** fundamentals, earnings dates, the market's trend and position size. Check the earnings date before entering. This is a mechanical reading of the chart, not a forecast or advice.
+"""
+    )
