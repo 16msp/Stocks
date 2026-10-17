@@ -29,6 +29,7 @@ full, _summaries = scan_all_sectors(0)
 price_of = dict(zip(full["Stock"], full["CMP"]))
 sector_of = full.drop_duplicates("Stock").set_index("Stock")["Sector"].to_dict()
 company_of = full.drop_duplicates("Stock").set_index("Stock")["Company"].to_dict()
+row_of = full.drop_duplicates("Stock").set_index("Stock", drop=False).to_dict("index")  # a stock's scan row = its technicals today
 
 try:
     trades = paper_trades.load()
@@ -64,7 +65,7 @@ def _colour(text, v):
 def _buy(symbol: str) -> None:
     price = price_of.get(symbol)
     try:
-        qty = paper_trades.buy(symbol, sector_of.get(symbol, ""), price, latest_session(symbol))
+        qty = paper_trades.buy(symbol, sector_of.get(symbol, ""), price, latest_session(symbol), paper_trades.snapshot(row_of[symbol]))
         st.session_state["paper_flash"] = f"Bought {qty} x {symbol} at ₹{price:,.2f} = ₹{qty * price:,.0f}."
     except Exception as exc:
         st.session_state["paper_flash"] = f"Could not buy {symbol}: {exc}"
@@ -96,7 +97,7 @@ with st.container(border=True):
         price = price_of.get(pick)
         qty = paper_trades.quantity_for(price)
         have = held.get(pick, 0)
-        full = have >= paper_trades.MAX_POSITIONS_PER_STOCK
+        at_max = have >= paper_trades.MAX_POSITIONS_PER_STOCK
         if qty < 1:
             st.warning("No price available, or a single share costs more than the limit.")
         else:
@@ -104,9 +105,10 @@ with st.container(border=True):
         if have:
             st.caption(f"You hold {have} of {paper_trades.MAX_POSITIONS_PER_STOCK} allowed open positions in {pick}.")
         st.button(
-            f"✅ Already at the maximum ({paper_trades.MAX_POSITIONS_PER_STOCK} positions)" if full else "🛒 Buy",
-            on_click=_buy, args=(pick,), disabled=qty < 1 or full, type="primary",
+            f"✅ Already at the maximum ({paper_trades.MAX_POSITIONS_PER_STOCK} positions)" if at_max else "🛒 Buy",
+            on_click=_buy, args=(pick,), disabled=qty < 1 or at_max, type="primary",
         )
+        st.caption("Each buy also saves today's technicals for this stock, so you can review later what the signals looked like.")
 
 # ---- open positions ----
 open_df = trades[trades["sell_price"].isna()].copy()
@@ -193,10 +195,94 @@ else:
         hide_index=True, width="stretch",
     )
 
+# ---- did the technicals work? ----
+st.subheader("Technicals at buy - did they work?")
+SIGNAL_NUM = [c for c in paper_trades.SIGNAL_FIELDS if c not in paper_trades.TEXT_SIGNALS and c != "Buy Score"]
+PCT_SIGNALS = {"52W High Drop", "Off 52W Low", "RS 1M", "RS 3M", "vs 200DMA", "Overhead Supply", "Supply to +25%", "vs POC", "Worst 1D Move"}
+
+
+def _review_frame(include_open: bool) -> pd.DataFrame:
+    """One row per trade: how it is doing, plus the technicals saved when it was bought."""
+    rows = []
+    for r in trades.itertuples():
+        sig = paper_trades.parse_signals(r.signals)
+        if pd.isna(r.sell_price):
+            if not include_open:
+                continue
+            now = price_of.get(r.symbol)
+            if now is None or pd.isna(now):
+                continue
+            pct, status = (float(now) / r.buy_price - 1) * 100, "open"
+        else:
+            pct, status = (r.sell_price / r.buy_price - 1) * 100, "closed"
+        pct = round(pct, 2) + 0.0  # same rounding as the rest of the page, so float noise never counts as a win or loss
+        days = ((date.fromisoformat(r.sell_date) if status == "closed" else date.today()) - date.fromisoformat(r.buy_date)).days
+        rows.append({"Stock": r.symbol, "Bought": r.buy_date, "Status": status, "Days": days, "Gain/loss %": pct,
+                     "Has snapshot": bool(sig), **{c: sig.get(c) for c in paper_trades.SIGNAL_FIELDS}})
+    return pd.DataFrame(rows)
+
+
+if trades.empty:
+    st.caption("No trades yet. Once you buy, each trade's technicals are saved here for review.")
+else:
+    scope = st.radio("Trades to include", ["Closed + open (open ones at today's price)", "Closed trades only"], horizontal=True, key="review_scope")
+    rev = _review_frame(include_open=scope.startswith("Closed +"))
+    with_sig = rev[rev["Has snapshot"]] if not rev.empty else rev
+    older = len(rev) - len(with_sig) if not rev.empty else 0
+    if older:
+        st.caption(f"{older} trade(s) were bought before snapshots existed and are left out of the review (their technicals were not saved).")
+    if with_sig.empty:
+        st.info("Nothing to review yet: no trade in this selection has saved technicals.")
+    else:
+        win = with_sig["Gain/loss %"] > 0
+        a, b, c = st.columns(3)
+        a.metric("Trades reviewed", len(with_sig))
+        b.metric("Winners", f"{int(win.sum())} ({win.mean():.0%})")
+        c.metric("Average gain/loss", _pct(with_sig["Gain/loss %"].mean()))
+        if len(with_sig) < 20:
+            st.caption("⚠️ Fewer than about 20 trades: treat these comparisons as hints, not proof.")
+
+        st.markdown("**By recommendation on the buy day**")
+        by_rec = with_sig.groupby("Recommendation", dropna=False).agg(
+            Trades=("Stock", "count"), Winners=("Gain/loss %", lambda v: int((v > 0).sum())),
+            **{"Avg gain/loss %": ("Gain/loss %", "mean"), "Best %": ("Gain/loss %", "max"), "Worst %": ("Gain/loss %", "min")},
+        ).reset_index()
+        by_rec["Win rate"] = by_rec["Winners"] / by_rec["Trades"] * 100
+        st.dataframe(by_rec[["Recommendation", "Trades", "Winners", "Win rate", "Avg gain/loss %", "Best %", "Worst %"]],
+                     column_config={c: st.column_config.NumberColumn(format="%.1f%%") for c in ["Win rate", "Avg gain/loss %", "Best %", "Worst %"]},
+                     hide_index=True, width="stretch")
+
+        st.markdown("**Winners vs losers: average of each technical on the buy day**")
+        if win.all() or (~win).all():
+            st.caption("All reviewed trades are on the same side (all winners or all losers), so there is nothing to compare yet.")
+        else:
+            comp = []
+            for col in ["Buy Score"] + SIGNAL_NUM:
+                w, l = with_sig.loc[win, col].dropna(), with_sig.loc[~win, col].dropna()
+                if len(w) and len(l):
+                    scale = 100 if col in PCT_SIGNALS else 1
+                    comp.append({"Technical": paper_trades.SIGNAL_FIELDS[col] + (" (%)" if col in PCT_SIGNALS else ""),
+                                 "Winners avg": w.mean() * scale, "Losers avg": l.mean() * scale, "Difference": (w.mean() - l.mean()) * scale})
+            st.dataframe(pd.DataFrame(comp), column_config={c: st.column_config.NumberColumn(format="%.2f") for c in ["Winners avg", "Losers avg", "Difference"]},
+                         hide_index=True, width="stretch")
+            st.caption("A big gap means that technical looked different for winners and losers. It does not prove it caused the result.")
+
+        with st.expander("Every trade with its technicals at buy"):
+            show = with_sig.drop(columns=["Has snapshot"]).rename(columns=paper_trades.SIGNAL_FIELDS)
+            for col in PCT_SIGNALS:
+                show[paper_trades.SIGNAL_FIELDS[col]] = show[paper_trades.SIGNAL_FIELDS[col]] * 100
+            st.dataframe(show.sort_values("Bought", ascending=False), hide_index=True, width="stretch",
+                         column_config={"Gain/loss %": st.column_config.NumberColumn(format="%.2f%%"),
+                                        **{paper_trades.SIGNAL_FIELDS[c]: st.column_config.NumberColumn(format="%.1f%%") for c in PCT_SIGNALS}})
+            st.caption("Percent-type technicals are shown in %. 'Up/Down vol', 'Vol trend' and 'Volatility' are ratios.")
+
 if not trades.empty:
     export = trades.copy()
     export["status"] = export["sell_price"].map(lambda v: "open" if pd.isna(v) else "closed")
-    st.download_button("⬇️ Download all paper trades as CSV", data=export.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
+    sig_cols = pd.DataFrame([{paper_trades.SIGNAL_FIELDS[k]: v for k, v in paper_trades.parse_signals(t).items() if k in paper_trades.SIGNAL_FIELDS}
+                             for t in export["signals"]], index=export.index)
+    export = pd.concat([export.drop(columns=["signals"]), sig_cols.add_prefix("buy: ")], axis=1)
+    st.download_button("⬇️ Download all paper trades (with technicals at buy) as CSV", data=export.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
                        file_name="paper_trades.csv", mime="text/csv")
 
     with st.expander("Made a mistake? Remove a trade"):
