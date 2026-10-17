@@ -186,6 +186,10 @@ TECH_COLUMNS = ["52W High Drop", "vs 200DMA", "Vol Trend", "Up/Down Vol", "VP Lo
 # Avg Value 20D = avg daily traded value, Rs crore; Worst 1D Move = biggest one-day close-to-close fall in the
 # last year (a -35% or worse day is normally a demerger / unadjusted corporate action, not a real crash)
 MARKET_EXTRA_COLUMNS = ["Last Close", "Avg Value 20D", "Worst 1D Move"]
+# Inputs for the Trend Template page: simple moving averages (with the 200-day as it stood 1 and 4 months ago) and
+# returns over ~3/6/9/12 months of trading sessions (63/126/189/252), which feed its relative-strength rating.
+TREND_COLUMNS = ["SMA 50", "SMA 150", "SMA 200", "SMA 200 1M Ago", "SMA 200 4M Ago", "Perf 3M", "Perf 6M", "Perf 9M", "Perf 12M"]
+PERF_SESSIONS = {"Perf 3M": 63, "Perf 6M": 126, "Perf 9M": 189, "Perf 12M": 252}
 VP_BINS = 40
 VP_VALUE_AREA = 0.70
 VP_LOOKBACK = 126  # ~6 months of sessions
@@ -240,7 +244,7 @@ def volume_profile(df: pd.DataFrame, ref_price: float | None = None, band_pct: f
 
 def _technicals(hist: pd.DataFrame) -> dict:
     """Technical attributes from ~14 months of daily OHLCV for one stock."""
-    out = {c: np.nan for c in TECH_COLUMNS + MARKET_EXTRA_COLUMNS}
+    out = {c: np.nan for c in TECH_COLUMNS + MARKET_EXTRA_COLUMNS + TREND_COLUMNS}
     hist = hist.dropna(subset=["Close"])
     if len(hist) < 30:
         return out
@@ -255,6 +259,18 @@ def _technicals(hist: pd.DataFrame) -> dict:
     out["Worst 1D Move"] = float(year["Close"].pct_change().min())
     if len(close) >= 200:
         out["vs 200DMA"] = last / float(close.iloc[-200:].mean()) - 1.0
+        out["SMA 200"] = float(close.iloc[-200:].mean())
+        if len(close) >= 221:
+            out["SMA 200 1M Ago"] = float(close.iloc[-221:-21].mean())
+        if len(close) >= 284:
+            out["SMA 200 4M Ago"] = float(close.iloc[-284:-84].mean())
+    if len(close) >= 50:
+        out["SMA 50"] = float(close.iloc[-50:].mean())
+    if len(close) >= 150:
+        out["SMA 150"] = float(close.iloc[-150:].mean())
+    for name, n in PERF_SESSIONS.items():
+        if len(close) > n and close.iloc[-1 - n] > 0:
+            out[name] = last / float(close.iloc[-1 - n]) - 1.0
     if len(vol) >= 90 and vol.iloc[-90:].mean() > 0:
         out["Vol Trend"] = float(vol.iloc[-20:].mean() / vol.iloc[-90:].mean())
 
@@ -312,7 +328,7 @@ def fetch_market_stats(symbols: list[str], force: bool = False, update: bool = T
     looks current; `update=False` skips the Yahoo top-up and uses the store as it is.
     """
     uniq = sorted({s for s in symbols if isinstance(s, str) and s})
-    out = pd.DataFrame(index=pd.Index(uniq, name="Stock"), columns=RS_COLUMNS + TECH_COLUMNS + MARKET_EXTRA_COLUMNS, dtype=float)
+    out = pd.DataFrame(index=pd.Index(uniq, name="Stock"), columns=RS_COLUMNS + TECH_COLUMNS + MARKET_EXTRA_COLUMNS + TREND_COLUMNS, dtype=float)
     if not uniq:
         return out
 
