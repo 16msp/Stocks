@@ -5,6 +5,8 @@ Rules, kept deliberately simple:
 - up to MAX_POSITIONS_PER_STOCK open positions per stock (each sells separately);
 - trades execute at the last completed daily close from the price store (no live quotes);
 - no brokerage, taxes or slippage; a sell closes the whole position;
+- a buy is refused if the same stock was bought less than SAME_STOCK_SECONDS ago or MAX_BUYS_PER_MINUTE buys were made in the last minute (a safeguard
+  against runaway clicks; every new trade records when it was made);
 - every buy also stores a snapshot of the card's technicals (SIGNAL_FIELDS) so that, months later, the trades can be
   compared with how they turned out.
 """
@@ -13,7 +15,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -21,8 +23,10 @@ from strategies import price_store
 
 BUDGET = 50_000  # rupees per transaction
 MAX_POSITIONS_PER_STOCK = 3  # open positions allowed in one stock at a time
+SAME_STOCK_SECONDS = 60  # the same stock cannot be bought twice within this many seconds
+MAX_BUYS_PER_MINUTE = 5  # across all stocks
 
-COLUMNS = ["id", "symbol", "sector", "qty", "buy_price", "buy_date", "buy_session", "sell_price", "sell_date", "sell_session", "signals"]
+COLUMNS = ["id", "symbol", "sector", "qty", "buy_price", "buy_date", "buy_session", "sell_price", "sell_date", "sell_session", "signals", "created_at"]
 
 # Scan-table column -> short label, in the order shown on the card. Numbers stay numbers; the text ones are labels.
 SIGNAL_FIELDS = {
@@ -74,13 +78,17 @@ def _db():
         f"""CREATE TABLE IF NOT EXISTS paper_trades (
             id TEXT PRIMARY KEY, symbol TEXT NOT NULL, sector TEXT, qty INTEGER NOT NULL,
             buy_price {real} NOT NULL, buy_date TEXT NOT NULL, buy_session TEXT,
-            sell_price {real}, sell_date TEXT, sell_session TEXT, signals TEXT)"""
+            sell_price {real}, sell_date TEXT, sell_session TEXT, signals TEXT, created_at TEXT)"""
     )
-    # trades recorded before snapshots existed: add the column once (they simply have no snapshot)
+    # columns added after the first release: trades made before them simply have no value
     if db.is_pg:
         db.execute("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS signals TEXT")
-    elif "signals" not in [r[1] for r in db.rows("PRAGMA table_info(paper_trades)")]:
-        db.execute("ALTER TABLE paper_trades ADD COLUMN signals TEXT")
+        db.execute("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS created_at TEXT")
+    else:
+        have = [r[1] for r in db.rows("PRAGMA table_info(paper_trades)")]
+        for col in ("signals", "created_at"):
+            if col not in have:
+                db.execute(f"ALTER TABLE paper_trades ADD COLUMN {col} TEXT")
     db.commit()
     return db
 
@@ -115,10 +123,17 @@ def buy(symbol: str, sector: str, price: float, session: str | None, signals: di
         held = db.rows("SELECT COUNT(*) FROM paper_trades WHERE symbol = ? AND sell_price IS NULL", (symbol,))[0][0]
         if held >= MAX_POSITIONS_PER_STOCK:
             raise ValueError(f"You already hold {held} open positions in {symbol} (maximum {MAX_POSITIONS_PER_STOCK}). Sell one first.")
+        now = datetime.now(timezone.utc)
+        same_cut = (now - timedelta(seconds=SAME_STOCK_SECONDS)).isoformat(timespec="seconds")
+        if db.rows("SELECT COUNT(*) FROM paper_trades WHERE symbol = ? AND created_at >= ?", (symbol, same_cut))[0][0]:
+            raise ValueError(f"{symbol} was bought less than {SAME_STOCK_SECONDS} seconds ago. Wait a minute before buying it again.")
+        minute_cut = (now - timedelta(seconds=60)).isoformat(timespec="seconds")
+        if db.rows("SELECT COUNT(*) FROM paper_trades WHERE created_at >= ?", (minute_cut,))[0][0] >= MAX_BUYS_PER_MINUTE:
+            raise ValueError(f"{MAX_BUYS_PER_MINUTE} buys were already made in the last minute. Wait a moment, then try again.")
         db.execute(
-            "INSERT INTO paper_trades (id, symbol, sector, qty, buy_price, buy_date, buy_session, signals) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO paper_trades (id, symbol, sector, qty, buy_price, buy_date, buy_session, signals, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (uuid.uuid4().hex, symbol, sector, qty, round(float(price), 2), date.today().isoformat(), session,
-             json.dumps(signals) if signals else None),
+             json.dumps(signals) if signals else None, now.isoformat(timespec="seconds")),
         )
         db.commit()
     finally:
