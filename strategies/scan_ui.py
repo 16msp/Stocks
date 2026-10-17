@@ -7,7 +7,7 @@ from urllib.parse import quote
 import pandas as pd
 import streamlit as st
 
-from strategies import favourites
+from strategies import favourites, paper_trades, price_store
 from strategies.holdings_style import BAD, GOOD, MID
 
 FAV_ON, FAV_OFF = "❤️", "🤍"
@@ -37,6 +37,34 @@ def _toggle_favourite(symbol: str, sector: str) -> None:
             favs.add(symbol)
     except Exception as exc:
         st.toast(f"Could not update favourites: {str(exc)[:120]}", icon="⚠️")
+
+
+def paper_open_counts(refresh: bool = False) -> dict:
+    """{ticker: open paper positions}, loaded once per session."""
+    if refresh or "paper_open" not in st.session_state:
+        try:
+            st.session_state["paper_open"] = paper_trades.open_counts()
+        except Exception:
+            st.session_state.setdefault("paper_open", {})
+    return st.session_state["paper_open"]
+
+
+def latest_session(symbol: str):
+    """Date of the last stored daily bar (the price a paper trade executes at)."""
+    try:
+        return price_store.get_status([symbol]).get("latest_session")
+    except Exception:
+        return None
+
+
+def _paper_buy(symbol: str, sector: str, price: float) -> None:
+    try:
+        qty = paper_trades.buy(symbol, sector, price, latest_session(symbol))
+        counts = paper_open_counts()
+        counts[symbol] = counts.get(symbol, 0) + 1
+        st.toast(f"Paper bought {qty} x {symbol} at ₹{price:,.2f} = ₹{qty * price:,.0f}. See the Paper Trades page.", icon="🛒")
+    except Exception as exc:
+        st.toast(f"Could not record the paper buy: {str(exc)[:140]}", icon="⚠️")
 
 
 REC_ICON = {"Accumulate": "🟢", "Strong - wait for dip": "🟡", "Watch - base forming": "🟡", "Avoid for now": "🔴", "Price break - check": "⚠️", "Insufficient data": "⚪"}
@@ -74,7 +102,7 @@ def render_card(r, sector: str = "", key_prefix: str = "card"):
         with head:
             owned = f" &nbsp; {r['Owned']}" if r["Owned"] else ""
             pick = f"{r['Pick']} &nbsp; " if r["Pick"] else ""
-            title, heart = st.columns([4, 1], vertical_alignment="center")
+            title, heart, cart = st.columns([3, 1, 1], vertical_alignment="center")
             title.markdown(f"### {pick}{r['Stock']}{owned}")
             is_fav = r["Stock"] in favourite_symbols()
             heart.button(
@@ -83,6 +111,26 @@ def render_card(r, sector: str = "", key_prefix: str = "card"):
                 help="Remove from favourites" if is_fav else "Add to favourites (see them all on the Favourites page)",
                 on_click=_toggle_favourite,
                 args=(r["Stock"], sector or r.get("Sector", "")),
+            )
+            price = r["CMP"]
+            qty = paper_trades.quantity_for(price)
+            held = paper_open_counts().get(r["Stock"], 0)
+            full = held >= paper_trades.MAX_POSITIONS_PER_STOCK
+            if full:
+                tip = f"You hold {held} of {paper_trades.MAX_POSITIONS_PER_STOCK} allowed paper positions - sell one on the Paper Trades page to buy again"
+            elif qty >= 1:
+                tip = f"Paper buy {qty} shares at ₹{price:,.2f} = ₹{qty * price:,.0f} (limit ₹{paper_trades.BUDGET:,})"
+                if held:
+                    tip += f". You already hold {held} of {paper_trades.MAX_POSITIONS_PER_STOCK}."
+            else:
+                tip = "No price, or one share costs more than the paper-trade limit"
+            cart.button(
+                "✅" if full else (f"🛒{held}" if held else "🛒"),
+                key=f"{key_prefix}_buy_{r['Stock']}",
+                disabled=full or qty < 1,
+                help=tip,
+                on_click=_paper_buy,
+                args=(r["Stock"], sector or r.get("Sector", ""), price),
             )
             st.caption(r["Company"])
             st.markdown(f"[📈 TradingView]({tradingview_url(r['Stock'])}) &nbsp;·&nbsp; [📊 Screener]({screener_url(r['Stock'])})")
