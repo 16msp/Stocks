@@ -8,10 +8,10 @@ import pandas as pd
 import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from strategies import position_guide as pg  # noqa: E402
 from strategies import price_store  # noqa: E402
 from strategies import sector_scanner as scanner  # noqa: E402
 from strategies.holdings_style import BAD, GOOD, MID  # noqa: E402
+from strategies.scan_all import scan_all_sectors  # noqa: E402
 
 st.set_page_config(page_title="Sector Overview", page_icon="🧭", layout="wide")
 
@@ -38,17 +38,11 @@ def _health(rs3m, above200):
     return "🟡 Mixed"
 
 
-@st.cache_data(ttl=3600, show_spinner="Scanning all sectors from the stored prices (about 15 seconds the first time)...")
 def _overview(nonce: int) -> pd.DataFrame:
-    universes = {name: scanner.load_universe(name)[0] for name in scanner.SECTORS}
-    symbols = sorted({s for u in universes.values() for s in u["Stock"]})
-    stats = pg.fetch_market_stats(symbols, update=False)
+    full, summaries = scan_all_sectors(nonce)
     rows = []
-    for name, uni in universes.items():
-        res = scanner.scan_sector(name, stats, uni, owned=set())
-        if not res.ok:
-            continue
-        t, s = res.table, res.summary
+    for name, s in summaries.items():
+        t = full[full["Sector"] == name]
         liquid = t[(t["Recommendation"] == "Accumulate") & (t["Avg Value 20D"] >= LIQUID_CR)]
         liquid = liquid.sort_values("Buy Score", ascending=False).head(3)
         rows.append({
@@ -74,7 +68,7 @@ if "overview_nonce" not in st.session_state:
 st.sidebar.header("Sector Overview")
 if st.sidebar.button("🔄 Recalculate", width="stretch"):
     st.session_state.overview_nonce += 1
-    _overview.clear()
+    scan_all_sectors.clear()
 
 df = _overview(st.session_state.overview_nonce)
 store = price_store.get_status(sorted({s for name in scanner.SECTORS for s in scanner.SECTORS[name].get("symbols", [])}))
