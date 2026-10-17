@@ -67,6 +67,7 @@ def _paper_buy(symbol: str, sector: str, price: float, signals: dict | None = No
         st.toast(f"Could not record the paper buy: {str(exc)[:140]}", icon="⚠️")
 
 
+PLAN_ICON = {"Broke out": "🟢", "Near pivot": "🟡", "Building": "⚪", "Extended": "🔴", "No data": "⚪"}
 REC_ICON = {"Accumulate": "🟢", "Strong - wait for dip": "🟡", "Watch - base forming": "🟡", "Avoid for now": "🔴", "Price break - check": "⚠️", "Insufficient data": "⚪"}
 
 
@@ -96,7 +97,9 @@ def _style_for(value, good, bad, higher=True):
     return GOOD if v >= g else (BAD if v <= b else MID)
 
 
-def render_card(r, sector: str = "", key_prefix: str = "card"):
+def render_card(r, sector: str = "", key_prefix: str = "card", plan: dict | None = None):
+    """One stock card. With `plan` (from strategies.entry_plan) the card shows the Trend Template view: setup status, RS rating,
+    template pass/fail reasons (r["Template why"]) and a buy point / stop / risk block."""
     with st.container(border=True):
         head, body, why = st.columns([1.5, 3.0, 2.0])
         with head:
@@ -134,8 +137,12 @@ def render_card(r, sector: str = "", key_prefix: str = "card"):
             )
             st.caption(r["Company"])
             st.markdown(f"[📈 TradingView]({tradingview_url(r['Stock'])}) &nbsp;·&nbsp; [📊 Screener]({screener_url(r['Stock'])})")
-            st.markdown(f"{REC_ICON.get(r['Recommendation'], '')} **{r['Recommendation']}**")
-            st.metric("Buy Score", _fmt(r["Buy Score"], "int"), help="0-100 timing score")
+            if plan:
+                st.markdown(f"{PLAN_ICON.get(plan['Status'], '')} **{plan['Status']}**")
+                st.metric("RS Rating", _fmt(r["RS Rating"], "int"), help="1-99 rank of the 3/6/9/12-month return against the stocks in these sector lists")
+            else:
+                st.markdown(f"{REC_ICON.get(r['Recommendation'], '')} **{r['Recommendation']}**")
+                st.metric("Buy Score", _fmt(r["Buy Score"], "int"), help="0-100 timing score")
         with body:
             st.markdown(
                 f"**CMP ₹{_fmt(r['CMP'], 'px')}** &nbsp;|&nbsp; 52W high drop **{_fmt(r['52W High Drop'], 'pct0')}** "
@@ -161,12 +168,33 @@ def render_card(r, sector: str = "", key_prefix: str = "card"):
             )
             st.caption(f"Volume-profile zone: {r['VP Zone'] or 'n/a'} (CMP {_fmt(r['vs POC'], 'pct')} vs POC) · avg traded ₹{_fmt(r['Avg Value 20D'], 'px')} cr/day")
         with why:
-            good, _, bad = r["Why"].partition(" | ")
-            if not r["Why"].startswith("✔"):
-                good, bad = "", r["Why"]
+            why_text = r["Template why"] if plan else r["Why"]
+            good, _, bad = why_text.partition(" | ")
+            if not why_text.startswith("✔"):
+                good, bad = "", why_text
             for item in [g for g in good.removeprefix("✔ ").split("; ") if g]:
                 st.markdown(f"✔ {item}")
             for item in [b for b in bad.removeprefix("✖ ").split("; ") if b]:
                 st.markdown(f"✖ {item}")
+        if plan:
+            _plan_block(r, plan)
 
 
+def _plan_block(r, plan: dict) -> None:
+    st.divider()
+    st.markdown(f"**Trade plan:** {plan['Verdict']}")
+    if pd.isna(plan["Entry"]):
+        return
+    entry, stop = plan["Entry"], plan["Stop"]
+    qty = paper_trades.quantity_for(entry)
+    a, b, c, d = st.columns(4)
+    a.metric("Pivot (buy point)", f"₹{plan['Pivot']:,.2f}", f"{plan['To pivot']:+.1%} from the pivot", delta_color="off")
+    b.metric("Entry / buy up to", f"₹{entry:,.2f}", f"up to ₹{plan['Buy up to']:,.2f}", delta_color="off")
+    c.metric("Stop", f"₹{stop:,.2f}", f"-{plan['Risk %']:.1%} from entry", delta_color="off", help=plan["Stop note"])
+    d.metric("Targets (2x / 3x the risk)", f"₹{plan['Target 2R']:,.2f}", f"3x: ₹{plan['Target 3R']:,.2f}", delta_color="off")
+    loss = f" · if stopped on a ₹{paper_trades.BUDGET:,} buy ({qty} shares) you lose about ₹{qty * (entry - stop):,.0f}" if qty >= 1 else ""
+    vol_line = f" · breakout volume {plan['Breakout volume']}" if plan["Breakout volume"] else f" · needs {plan['Volume to confirm']:,.0f}+ shares on the breakout day (1.4x average)"
+    st.caption(
+        f"Pullbacks in the base: {plan['Contractions'] or 'none of 3%+'} ({'tightening ✔' if plan['Tightening'] else 'not clearly tightening ✖'}) · "
+        f"volume {'dried up ✔' if plan['Volume dried up'] else 'has not dried up ✖'}{vol_line}{loss}"
+    )
