@@ -84,6 +84,16 @@ base = full.drop(columns=["Sector", "Owned", "Pick"]).drop_duplicates("Stock").s
 sector_of = full.groupby("Stock")["Sector"].agg(lambda s: ", ".join(dict.fromkeys(s)))
 data = base.join(sector_of).reset_index()
 
+mkt_breadth = market_trend.breadth(data)
+_b = (f"**Market breadth: {mkt_breadth['above50']:.0%} of stocks are above their 50-day average** ({mkt_breadth['above200']:.0%} above their 200-day), out of {mkt_breadth['stocks']} stocks. "
+      f"In the backtest, breakouts worked far better when {market_trend.BREADTH_MIN:.0%} or more were above their 50-day average (see the Minervini Backtest page).")
+if mkt_breadth["ok"]:
+    st.success(_b + " That is the case now.")
+elif mkt_breadth["above50"] >= 0.5:
+    st.info(_b + " Not there yet: breadth is middling, so be selective.")
+else:
+    st.warning(_b + " Breadth is weak: most stocks are not in an uptrend, so treat the list below as a watch list.")
+
 with st.expander("Thresholds (Minervini's own are the defaults)"):
     c1, c2, c3 = st.columns(3)
     near_high = c1.slider("Within this % of the 52-week high", 5, 40, int(tt.DEFAULTS["near_high"] * 100), step=1) / 100
@@ -243,7 +253,8 @@ with cards_tab:
         card["Pick"] = ""
         card["Owned"] = ""
         render_card(card, str(row["Sector"]).split(", ")[0], key_prefix="ttcard",
-                    plan={**row[entry_plan.COLUMNS].to_dict(), **row[["Qty", "Invested", "Max loss", "Sizing note", "Results note"]].to_dict(), "Market state": mkt["state"]})
+                    plan={**row[entry_plan.COLUMNS].to_dict(), **row[["Qty", "Invested", "Max loss", "Sizing note", "Results note"]].to_dict(), "Market state": mkt["state"],
+                          "Breadth 50": mkt_breadth["above50"], "Breadth 200": mkt_breadth["above200"]})
 
 with st.expander("How the trade plan is worked out"):
     st.markdown(
@@ -260,6 +271,7 @@ with st.expander("How the trade plan is worked out"):
 - **Targets:** entry + 2 or 3 times the risk. Many winners are held much longer.
 - **Position size:** shares = (your capital x your loss limit) / (entry - stop), never more than your largest-position share of capital. Set the three numbers in the sidebar.
 - **Market check:** Nifty above its 50-day, 50-day above 200-day, and the 200-day rising = uptrend. Below the 200-day = downtrend. Minervini does not buy breakouts in a downtrend.
+- **Market breadth:** the share of stocks in the sector lists closing above their own 50-day average. The backtest did much better when it was {market_trend.BREADTH_MIN:.0%} or more. It is a finding from past data (and from today's stock list), not a guarantee.
 - **Results dates:** from Yahoo Finance when you press the button; many small caps have none, so check the company's announcement. A results gap can jump past any stop.
 - **Not covered:** fundamentals (sales and earnings growth, margins), industry strength, and selling rules beyond the stop and targets. This is a mechanical reading of the chart, not a forecast or advice.
 """

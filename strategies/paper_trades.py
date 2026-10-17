@@ -56,7 +56,7 @@ def snapshot(row) -> dict:
 
 
 PLAN_FIELDS = ["Status", "Trade check", "Market state", "Pivot", "Entry", "Stop", "Risk %", "Target 2R", "Target 3R", "Base weeks", "Base depth",
-               "Contractions", "Shrinking", "Tightening", "Volume dried up", "Breakout quality"]
+               "Contractions", "Shrinking", "Tightening", "Volume dried up", "Breakout quality", "Breadth 50", "Breadth 200"]
 
 
 def plan_snapshot(plan) -> dict:

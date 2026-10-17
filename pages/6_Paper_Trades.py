@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from strategies import paper_trades, price_store  # noqa: E402
+from strategies import market_trend, paper_trades, price_store  # noqa: E402
 from strategies.scan_all import scan_all_sectors  # noqa: E402
 from strategies.scan_ui import latest_session  # noqa: E402
 
@@ -159,14 +159,18 @@ def _minervini_frame(sub: pd.DataFrame, include_open: bool) -> pd.DataFrame:
         triggered = plan.get("Status") == "Broke out"
         stop_ok = plan.get("Trade check") in ("OK", "OK, but stop is wide")
         market_ok = plan.get("Market state") != "Downtrend"
+        b50 = plan.get("Breadth 50")  # trades bought before breadth was recorded have none
+        breadth_ok = None if b50 is None else bool(b50 >= market_trend.BREADTH_MIN)
         pct = round((px / r.buy_price - 1) * 100, 2) + 0.0
         rows.append({
             "Stock": r.symbol, "Bought": r.buy_date, "Position": "open" if pd.isna(r.sell_price) else "closed",
             "Status at buy": plan.get("Status"), "Trade check at buy": plan.get("Trade check"), "Market at buy": plan.get("Market state"),
+            "Breadth at buy": b50, "Breadth band": "not recorded" if b50 is None else "70% or more" if b50 >= market_trend.BREADTH_MIN else "50% to 70%" if b50 >= 0.5 else "under 50%",
             "Entry": r.buy_price, "Stop": stop, "Target 2R": t2, "Risk %": plan.get("Risk %"), "Price now / sold": px, "Gain/loss %": pct,
             "R": (px - r.buy_price) / risk if risk and risk > 0 else float("nan"),
             "Stop touched": stop_hit, "2R reached": t2_hit, "3R reached": t3_hit,
-            "Triggered": triggered, "Stop OK": stop_ok, "Market OK": market_ok, "Followed all rules": bool(triggered and stop_ok and market_ok),
+            "Triggered": triggered, "Stop OK": stop_ok, "Market OK": market_ok, "Breadth OK": breadth_ok,
+            "Followed all rules": bool(triggered and stop_ok and market_ok and breadth_ok is not False),
         })
     return pd.DataFrame(rows)
 
@@ -269,7 +273,7 @@ def render_section(sub: pd.DataFrame, key: str, minervini: bool) -> None:
         else:
             a, b, c, d, e = st.columns(5)
             a.metric("Trades checked", len(mf))
-            b.metric("Followed all rules", int(mf["Followed all rules"].sum()), help="Setup had broken out (not just near the pivot), the chart stop was within 10%, and the Nifty was not in a downtrend that day.")
+            b.metric("Followed all rules", int(mf["Followed all rules"].sum()), help="Setup had broken out (not just near the pivot), the chart stop was within 10%, the Nifty was not in a downtrend that day, and at least 70% of stocks were above their 50-day average (trades bought before breadth was recorded are not judged on that).")
             c.metric("Stop touched since buy", int((mf["Stop touched"] != "").sum()), help="The day's low went to or under the stop at some point after the buy (intraday).")
             d.metric("Reached 2R", int((mf["2R reached"] != "").sum()), help="The day's high reached the 2x-risk target at some point after the buy.")
             e.metric("Average R", f"{mf['R'].mean():+.2f}" if mf["R"].notna().any() else "n/a", help="R = gain divided by the risk to the stop. +1R means a gain equal to what you risked.")
@@ -293,11 +297,15 @@ def render_section(sub: pd.DataFrame, key: str, minervini: bool) -> None:
             st.markdown("**By market trend at buy**")
             st.dataframe(_grp("Market at buy", "Market at buy"), hide_index=True, width="stretch",
                          column_config={"Avg gain/loss %": st.column_config.NumberColumn(format="%.2f%%"), "Avg R": st.column_config.NumberColumn(format="%.2f")})
+            st.markdown("**By market breadth at buy** (share of stocks above their 50-day average)")
+            st.dataframe(_grp("Breadth band", "Stocks above 50-day average"), hide_index=True, width="stretch",
+                         column_config={"Avg gain/loss %": st.column_config.NumberColumn(format="%.2f%%"), "Avg R": st.column_config.NumberColumn(format="%.2f")})
             with st.expander("Every Minervini trade with its plan and outcome"):
                 st.dataframe(
                     mf.sort_values("Bought", ascending=False).style.map(_tint, subset=["Gain/loss %"]), hide_index=True, width="stretch",
                     column_config={"Entry": st.column_config.NumberColumn(format="%.2f"), "Stop": st.column_config.NumberColumn(format="%.2f"),
                                    "Target 2R": st.column_config.NumberColumn(format="%.2f"), "Risk %": st.column_config.NumberColumn(format="percent"),
+                                   "Breadth at buy": st.column_config.NumberColumn(format="percent"),
                                    "Price now / sold": st.column_config.NumberColumn(format="%.2f"), "Gain/loss %": st.column_config.NumberColumn(format="%.2f%%"),
                                    "R": st.column_config.NumberColumn(format="%.2f")})
 

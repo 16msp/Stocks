@@ -138,6 +138,7 @@ def plan(hist: pd.DataFrame) -> dict:
         loc = (float(close.iloc[b]) - float(low.iloc[b])) / rng if rng > 0 else 1.0
         margin = float(close.iloc[b]) / float(prior_high.iloc[b]) - 1.0
         days_ago = n - 1 - b
+        out["Breakout age"], out["Breakout vol x"] = days_ago, day_vol_x  # used by the backtest (not table columns)
         out["Breakout quality"] = bool(day_vol_x >= BREAKOUT_VOL_X and loc >= MIN_CLOSE_LOCATION)
         out["Breakout note"] = (f"breakout day {'today' if not days_ago else f'{days_ago} day(s) ago'}: volume {day_vol_x:.1f}x average, closed in the "
                                 f"{'top' if loc >= 0.5 else 'bottom'} {max(loc, 1 - loc):.0%} of its range, {margin:+.1%} vs the pivot")
