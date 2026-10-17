@@ -7,7 +7,7 @@ The rules are mechanical so they can be checked on a chart:
 - Entry: pivot + 0.1% (for a stock already through the pivot, today's close, as long as it is within CHASE_LIMIT of the pivot).
 - Chase limit: more than CHASE_LIMIT above the pivot is "extended" - wait for a new base instead of buying.
 - Stop: just under the lowest low of the last STOP_LOOKBACK (15) sessions before the breakout, but never more than MAX_RISK below the entry (Minervini's 7-8% rule).
-- Contractions: pullbacks of at least MIN_SWING in closing price. A tightening base has a last pullback well under the biggest one and under 8%.
+- Contractions: pullbacks of at least MIN_SWING in closing price. Shrinking = none of the last three is more than 1.5 points deeper than the one before. Tightening = the last is under 8% and no more than 60% of the biggest.
 - Volume: it should dry up in the base, and the breakout day should trade at least BREAKOUT_VOL_X times the 50-day average volume.
 This is a rule-based chart reading, not a prediction or advice.
 """
@@ -26,11 +26,12 @@ NEAR_PIVOT = 0.03
 BREAKOUT_VOL_X = 1.4
 MIN_HISTORY = 70
 STOP_LOOKBACK = 15  # sessions
+SHRINK_TOLERANCE = MIN_SWING / 2  # each of the last 3 pullbacks may be at most 1.5 points deeper than the one before (half the minimum swing, i.e. noise)
 
-COLUMNS = ["Verdict", "Status", "Pivot", "Entry", "Buy up to", "Stop", "Risk %", "Stop note", "Contractions", "Tightening", "Volume dried up",
+COLUMNS = ["Verdict", "Status", "Pivot", "Entry", "Buy up to", "Stop", "Risk %", "Stop note", "Contractions", "Shrinking", "Tightening", "Volume dried up",
            "Breakout volume", "Volume to confirm", "To pivot", "Target 2R", "Target 3R"]
 EMPTY = {c: np.nan for c in COLUMNS} | {"Verdict": "Not enough price history", "Status": "No data", "Stop note": "", "Contractions": "",
-                                       "Tightening": False, "Volume dried up": False, "Breakout volume": ""}
+                                       "Shrinking": False, "Tightening": False, "Volume dried up": False, "Breakout volume": ""}
 
 
 def _pullbacks(close: pd.Series, min_swing: float) -> list:
@@ -92,6 +93,8 @@ def plan(hist: pd.DataFrame) -> dict:
     pulls = _pullbacks(base_close, MIN_SWING) if len(base_close) > 3 else []
     depths = [d for d, _, _ in pulls]
     out["Contractions"] = " > ".join(f"{d:.0%}" for d in depths[-4:])
+    last3 = depths[-3:]
+    out["Shrinking"] = bool(len(last3) >= 2 and all(b <= a + SHRINK_TOLERANCE for a, b in zip(last3, last3[1:])))
     out["Tightening"] = bool(len(depths) >= 2 and depths[-1] <= 0.6 * max(depths) and depths[-1] <= 0.08)
 
     # stop: under the lowest low of the STOP_LOOKBACK sessions before the breakout (or before today if it has not broken out)

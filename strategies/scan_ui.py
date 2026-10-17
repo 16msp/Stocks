@@ -195,6 +195,6 @@ def _plan_block(r, plan: dict) -> None:
     loss = f" · if stopped on a ₹{paper_trades.BUDGET:,} buy ({qty} shares) you lose about ₹{qty * (entry - stop):,.0f}" if qty >= 1 else ""
     vol_line = f" · breakout volume {plan['Breakout volume']}" if plan["Breakout volume"] else f" · needs {plan['Volume to confirm']:,.0f}+ shares on the breakout day (1.4x average)"
     st.caption(
-        f"Pullbacks in the base: {plan['Contractions'] or 'none of 3%+'} ({'tightening ✔' if plan['Tightening'] else 'not clearly tightening ✖'}) · "
+        f"Pullbacks in the base: {plan['Contractions'] or 'none of 3%+'} ({'each one no deeper than the last ✔' if plan['Shrinking'] else 'not steadily shrinking ✖'}, {'final one tight ✔' if plan['Tightening'] else 'final one not tight ✖'}) · "
         f"volume {'dried up ✔' if plan['Volume dried up'] else 'has not dried up ✖'}{vol_line}{loss}"
     )

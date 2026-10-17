@@ -68,6 +68,12 @@ need = f1.selectbox("Criteria to meet", [8, 7, 6, 5], format_func=lambda n: f"Al
 sectors = f2.multiselect("Sectors", sorted(scanner.SECTORS), placeholder="All sectors")
 hide_thin = f3.checkbox(f"Hide thinly traded (< ₹{scanner.MIN_LIQUIDITY_CR} cr/day)", value=True)
 tight_only = f4.checkbox("Only volatility-contracting (VCP-style)", value=False, help="Average true range over the last 20 sessions is below 85% of its 100-session average. This checks the tightening of daily ranges only; read the Trade plan on each card for the actual base.")
+strict = st.checkbox(
+    "Textbook VCP only: shrinking pullbacks, tight final pullback, volume dried up", value=False,
+    help="Needs all three flags from the Trade plan: none of the last three pullbacks is more than 1.5 points deeper than the one before (Shrinking), the last pullback "
+         "is under 8% and no more than 60% of the biggest (Tightening), and the last 10 sessions' average volume is below 80% of the 50-day average (Volume dried up). "
+         "Combine it with 'Near pivot' or 'Broke out' to find setups that are ready or just triggered.",
+)
 setup = f5.multiselect("Setup status", ["Broke out", "Near pivot", "Building", "Extended"], placeholder="Any status", help="Broke out: through the pivot, within 5%. Near pivot: within 3% below it. Building: further below. Extended: more than 5% above the pivot.")
 
 res = judged[judged["Criteria met"] >= need]
@@ -82,6 +88,8 @@ plans = _plans(tuple(sorted(res["Stock"])), st.session_state.trend_nonce) if len
 res = res.join(plans, on="Stock")
 if setup:
     res = res[res["Status"].isin(setup)]
+if strict:
+    res = res[res[["Shrinking", "Tightening", "Volume dried up"]].fillna(False).astype(bool).all(axis=1)]
 res = res.assign(_s=res["Status"].map(STATUS_ORDER)).sort_values(["_s", "Criteria met", "RS Rating"], ascending=[True, False, False]).drop(columns="_s")
 res["Template why"] = res.apply(
     lambda r: "✔ " + "; ".join(tt.CRITERIA[c] for c in tt.CRITERIA if r[c]) + (" | ✖ " + r["Missing"].replace(", ", "; ") if r["Missing"] else ""), axis=1,
@@ -108,7 +116,7 @@ with table_tab:
         st.info("No stocks fit with these settings. Try 'At least 7 of 8', which also lists the one condition each is missing.")
     else:
         cols = ["Stock", "Sector", "Status", "Verdict", "CMP", "Pivot", "Entry", "Buy up to", "Stop", "Risk %", "Target 2R", "Target 3R", "Contractions",
-                "Tightening", "Volume dried up", "Volume to confirm", "Criteria met", "Missing", "RS Rating", "SMA 50", "SMA 150", "SMA 200", "200DMA up 4M",
+                "Shrinking", "Tightening", "Volume dried up", "Volume to confirm", "Criteria met", "Missing", "RS Rating", "SMA 50", "SMA 150", "SMA 200", "200DMA up 4M",
                 "52W High Drop", "Off 52W Low", "vs 200DMA", "Volatility Ratio", "Vol Trend", "Up/Down Vol", "Avg Value 20D"]
         view = res[cols].copy()
         view.insert(1, "TradingView", view["Stock"].map(tradingview_url))
@@ -128,7 +136,8 @@ with table_tab:
                 "Risk %": st.column_config.NumberColumn(format="percent", help="Entry to stop"),
                 "Target 2R": st.column_config.NumberColumn(format="%.2f", help="Entry + 2x the risk"),
                 "Target 3R": st.column_config.NumberColumn(format="%.2f", help="Entry + 3x the risk"),
-                "Tightening": st.column_config.CheckboxColumn(help="The last pullback is under 8% and well under the biggest one"),
+                "Shrinking": st.column_config.CheckboxColumn(help="None of the last three pullbacks is more than 1.5 points deeper than the one before"),
+                "Tightening": st.column_config.CheckboxColumn(help="The last pullback is under 8% and no more than 60% of the biggest one"),
                 "Volume dried up": st.column_config.CheckboxColumn(help="Average volume of the last 10 sessions is below 80% of the 50-day average"),
                 "Volume to confirm": st.column_config.NumberColumn(format="%.0f", help="1.4x the 50-day average volume: the breakout day should trade at least this many shares"),
                 "Criteria met": st.column_config.NumberColumn(format="%.0f / 8"),
@@ -179,7 +188,9 @@ with st.expander("How the trade plan is worked out"):
   His rule is to cut losses at 7-8%, so if the chart's own low is further away the stop is capped and the setup is shown with an 8% risk.
 - **Targets:** entry + 2 or 3 times the risk. A breakout that does not run at least that far is a poor trade; many winners are held much longer.
 - **Volume:** the base should show volume drying up, and the breakout day should trade at least {entry_plan.BREAKOUT_VOL_X}x the 50-day average ("Volume to confirm").
-- **Tightening:** the last pullback of {entry_plan.MIN_SWING:.0%}+ is under 8% and no more than 60% of the biggest pullback in the base.
+- **Shrinking:** of the last three pullbacks ({entry_plan.MIN_SWING:.0%}+ in closing price), none is more than 1.5 points deeper than the one before.
+- **Tightening:** the last pullback is under 8% and no more than 60% of the biggest pullback in the base.
+- **Textbook VCP filter:** needs Shrinking, Tightening and Volume dried up together.
 - **Not covered:** fundamentals, earnings dates, the market's trend and position size. Check the earnings date before entering. This is a mechanical reading of the chart, not a forecast or advice.
 """
     )
