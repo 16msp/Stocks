@@ -26,15 +26,17 @@ def favourite_symbols(refresh: bool = False) -> set:
     return st.session_state["fav_symbols"]
 
 
-def _toggle_favourite(symbol: str, sector: str) -> None:
+def _toggle_favourite(symbol: str, sector: str, source: str = "card") -> None:
     favs = favourite_symbols()
     try:
         if symbol in favs:
-            favourites.remove([symbol])
+            favourites.remove([symbol], source=source)
             favs.discard(symbol)
         else:
-            favourites.add(symbol, sector)
+            favourites.add(symbol, sector, source=source)
             favs.add(symbol)
+    except favourites.TooFast as exc:
+        st.toast(str(exc), icon="🛑")
     except Exception as exc:
         st.toast(f"Could not update favourites: {str(exc)[:120]}", icon="⚠️")
 
@@ -72,6 +74,17 @@ PLAN_ICON = {"Broke out": "🟢", "Retesting": "🟡", "Near pivot": "🟡", "Bu
 REC_ICON = {"Accumulate": "🟢", "Strong - wait for dip": "🟡", "Watch - base forming": "🟡", "Avoid for now": "🔴", "Price break - check": "⚠️", "Insufficient data": "⚪"}
 
 
+# Column settings for the NSE shareholding figures (percentage points, so not the 'percent' format used for fractions)
+_HOLDING_NOTE = ("Public shareholding from the company's quarterly filing on NSE. A fall means promoters (or other non-public holders) bought from the public. "
+                 "Blank for companies with no promoter. Backtest of 2022-26 filings: a small fall (0.25 to 2 points over a year) was followed by somewhat better 6-month returns, "
+                 "but bigger falls were not, so treat it as a clue, not a signal.")
+HOLDING_CONFIG = {
+    "Public Holding": st.column_config.NumberColumn(format="%.1f%%", help="Public shareholding at the latest quarter end (NSE filing)."),
+    "Public Δ 1Q": st.column_config.NumberColumn(format="%+.2f pp", help="Change in public shareholding over the last quarter, in percentage points. " + _HOLDING_NOTE),
+    "Public Δ 1Y": st.column_config.NumberColumn(format="%+.2f pp", help="Change in public shareholding over the last year, in percentage points. " + _HOLDING_NOTE),
+}
+
+
 def tradingview_url(symbol):
     return f"https://www.tradingview.com/chart/?symbol=NSE%3A{quote(symbol, safe='')}"
 
@@ -84,6 +97,13 @@ def _fmt(v, kind):
     if v is None or pd.isna(v):
         return "n/a"
     return {"pct": f"{v:+.1%}", "pct0": f"{v:.0%}", "x": f"{v:.2f}x", "int": f"{v:.0f}", "px": f"{v:,.2f}"}[kind]
+
+
+def _pp(v, delta=False):
+    """Shareholding figure in percentage points: '28.2%' or, as a change, '-0.50 pp'."""
+    if v is None or pd.isna(v):
+        return "n/a"
+    return f"{v:+.2f} pp" if delta else f"{v:.1f}%"
 
 
 def _chip(label, value, style):
@@ -114,7 +134,7 @@ def render_card(r, sector: str = "", key_prefix: str = "card", plan: dict | None
                 key=f"{key_prefix}_fav_{r['Stock']}",
                 help="Remove from favourites" if is_fav else "Add to favourites (see them all on the Favourites page)",
                 on_click=_toggle_favourite,
-                args=(r["Stock"], sector or r.get("Sector", "")),
+                args=(r["Stock"], sector or r.get("Sector", ""), key_prefix),
             )
             price = r["CMP"]
             qty = paper_trades.quantity_for(price)
@@ -150,6 +170,7 @@ def render_card(r, sector: str = "", key_prefix: str = "card", plan: dict | None
             st.markdown(
                 f"**CMP ₹{_fmt(r['CMP'], 'px')}** &nbsp;|&nbsp; 52W high drop **{_fmt(r['52W High Drop'], 'pct0')}** "
                 f"&nbsp;|&nbsp; ATH drop **{_fmt(r.get('ATH Drop'), 'pct0')}** "
+                f"&nbsp;|&nbsp; public holding **{_pp(r.get('Public Holding'))}** (1Y {_pp(r.get('Public Δ 1Y'), True)}) "
                 f"&nbsp;|&nbsp; bounce off low **{_fmt(r['Off 52W Low'], 'pct0')}** &nbsp;|&nbsp; RSI **{_fmt(r['RSI 14'], 'int')}**"
             )
             st.markdown(

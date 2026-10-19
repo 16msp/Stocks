@@ -32,7 +32,7 @@ COLUMNS = ["id", "symbol", "sector", "qty", "buy_price", "buy_date", "buy_sessio
 
 # Scan-table column -> short label, in the order shown on the card. Numbers stay numbers; the text ones are labels.
 SIGNAL_FIELDS = {
-    "Recommendation": "Recommendation", "Buy Score": "Buy Score", "52W High Drop": "52W high drop", "ATH Drop": "ATH drop", "Off 52W Low": "Bounce off low",
+    "Recommendation": "Recommendation", "Buy Score": "Buy Score", "52W High Drop": "52W high drop", "ATH Drop": "ATH drop", "Public Δ 1Y": "Public holding change 1Y (pts)", "Off 52W Low": "Bounce off low",
     "RSI 14": "RSI", "RS 1M": "RS 1M", "RS 3M": "RS 3M", "vs 200DMA": "vs 200DMA", "Up/Down Vol": "Up/Down vol",
     "Vol Trend": "Vol trend", "Days Since Low": "Days since low", "Overhead Supply": "Overhead supply",
     "Supply to +25%": "Supply to +25%", "Volatility Ratio": "Volatility", "VP Zone": "Volume-profile zone",
