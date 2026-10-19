@@ -10,6 +10,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from strategies import position_guide as strategy  # noqa: E402
 from strategies.config import get_setting  # noqa: E402
 from strategies.holdings_style import style_holdings  # noqa: E402
+from strategies.scan_ui import HOLDING_CONFIG  # noqa: E402
 
 st.set_page_config(page_title="Position Guide", page_icon="🧭", layout="wide")
 
@@ -220,6 +221,7 @@ st.dataframe(
     column_config={
         "52W High Drop": st.column_config.NumberColumn(format="percent"),
         "ATH Drop": st.column_config.NumberColumn(format="percent", help="From the all-time closing high (since listing). 0% = at its all-time high. Yahoo does not adjust for demergers, so a stock that demerged can show a bigger drop than a holder actually lost."),
+        **HOLDING_CONFIG,
         "vs 200DMA": st.column_config.NumberColumn(format="percent"),
         "Vol Trend": st.column_config.NumberColumn(format="%.2fx"),
         "Up/Down Vol": st.column_config.NumberColumn(format="%.2fx"),

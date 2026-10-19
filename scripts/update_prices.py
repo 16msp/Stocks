@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from strategies import position_guide as pg  # noqa: E402
-from strategies import price_store, sector_scanner  # noqa: E402
+from strategies import price_store, sector_scanner, shareholding  # noqa: E402
 from strategies.config import get_setting  # noqa: E402
 
 
@@ -46,6 +46,10 @@ def main() -> int:
         print("All-time highs:", price_store.update_ath(sorted(symbols)))
     except Exception as exc:  # the prices are the important part
         print(f"Could not update the all-time highs: {exc}")
+    try:
+        print("Shareholding:", shareholding.update(sorted(symbols)))
+    except Exception as exc:  # NSE may refuse the hosted runner; prices are the important part
+        print(f"Could not update the shareholding patterns: {exc}")
     print("Store status:", price_store.get_status(sorted(symbols)))
     fetched = summary["new"] + summary["incremental"] + summary["resynced"] + summary["up_to_date"]
     return 0 if fetched > 0 else 1

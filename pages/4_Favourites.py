@@ -13,7 +13,7 @@ from strategies import price_store  # noqa: E402
 from strategies import sector_scanner as scanner  # noqa: E402
 from strategies.config import get_setting  # noqa: E402
 from strategies.holdings_style import style_holdings  # noqa: E402
-from strategies.scan_ui import favourite_symbols, render_card, screener_url, tradingview_url  # noqa: E402
+from strategies.scan_ui import HOLDING_CONFIG, favourite_symbols, render_card, screener_url, tradingview_url  # noqa: E402
 
 st.set_page_config(page_title="Favourites", page_icon="❤️", layout="wide")
 
@@ -99,7 +99,7 @@ m4.metric("🔴 Avoid", int((t["Recommendation"] == "Avoid for now").sum()))
 table_tab, cards_tab = st.tabs(["📊 All on one screen", "🃏 Cards"])
 
 with table_tab:
-    cols = ["Stock", "Sector", "Recommendation", "Buy Score", "CMP", "52W High Drop", "ATH Drop", "RS 1M", "RS 3M", "vs 200DMA",
+    cols = ["Stock", "Sector", "Recommendation", "Buy Score", "CMP", "52W High Drop", "ATH Drop", "RS 1M", "RS 3M", "Public Holding", "Public Δ 1Q", "Public Δ 1Y", "vs 200DMA",
             "Vol Trend", "Up/Down Vol", "Overhead Supply", "Supply to +25%", "RSI 14", "Days Since Low",
             "Volatility Ratio", "Off 52W Low", "vs POC", "VP Zone", "Avg Value 20D"]
     view = t[[c for c in cols if c in t.columns]].copy()
@@ -119,6 +119,7 @@ with table_tab:
             "CMP": st.column_config.NumberColumn(format="%.2f"),
             "52W High Drop": st.column_config.NumberColumn(format="percent"),
             "ATH Drop": st.column_config.NumberColumn(format="percent", help="From the all-time closing high (since listing). 0% = at its all-time high. Yahoo does not adjust for demergers, so a stock that demerged can show a bigger drop than a holder actually lost."),
+            **HOLDING_CONFIG,
             "RS 1M": st.column_config.NumberColumn(format="percent"),
             "RS 3M": st.column_config.NumberColumn(format="percent"),
             "vs 200DMA": st.column_config.NumberColumn(format="percent"),
@@ -148,7 +149,7 @@ with table_tab:
         drop = [r.Stock for r in edited.itertuples() if r.Remove]
         try:
             favourites.set_notes({k: v for k, v in changed.items() if k not in drop})
-            favourites.remove(drop)
+            favourites.remove(drop, source="favourites-page")
             favourite_symbols(refresh=True)
             st.cache_data.clear()
             st.session_state["fav_flash"] = f"Saved {len(changed)} note change(s), removed {len(drop)} stock(s)."

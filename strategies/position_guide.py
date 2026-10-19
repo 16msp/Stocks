@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from strategies import price_store
+from strategies import price_store, shareholding
 
 CHUNK_SIZE = 50
 GOOGLE_SHEET_ID_RE = re.compile(r"docs\.google\.com/spreadsheets/d/([a-zA-Z0-9-_]+)")
@@ -182,7 +182,8 @@ def _window_return(close: pd.Series, days: int) -> float:
 
 
 TECH_COLUMNS = ["52W High Drop", "ATH Drop", "vs 200DMA", "Vol Trend", "Up/Down Vol", "VP Low (VAL)", "VP POC", "VP High (VAH)", "Overhead Supply", "Supply to +25%",
-                "RSI 14", "Days Since Low", "Volatility Ratio", "Off 52W Low"]
+                "RSI 14", "Days Since Low", "Volatility Ratio", "Off 52W Low",
+                "Public Holding", "Public Δ 1Q", "Public Δ 1Y"]  # the last three: strategies/shareholding.py (percentage points, not fractions)
 # Avg Value 20D = avg daily traded value, Rs crore; Worst 1D Move = biggest one-day close-to-close fall in the
 # last year (a -35% or worse day is normally a demerger / unadjusted corporate action, not a real crash)
 MARKET_EXTRA_COLUMNS = ["Last Close", "Avg Value 20D", "Worst 1D Move"]
@@ -339,6 +340,10 @@ def fetch_market_stats(symbols: list[str], force: bool = False, update: bool = T
         ath = price_store.load_ath(uniq)  # all-time closing highs, refreshed weekly by the daily job
     except Exception:
         ath = {}
+    try:
+        holding = shareholding.load(uniq)  # quarterly shareholding pattern from NSE, refreshed by the daily job
+    except Exception:
+        holding = pd.DataFrame()
 
     nifty_ret = {w: np.nan for w in RS_WINDOWS}
     if NIFTY_TICKER in history:
@@ -356,6 +361,9 @@ def fetch_market_stats(symbols: list[str], force: bool = False, update: bool = T
         if sym in ath:  # the stored high may be a few days old: a newer high in the price store wins
             top = max(ath[sym][0], float(hist["Close"].max()))
             out.loc[sym, "ATH Drop"] = float(hist["Close"].dropna().iloc[-1]) / top - 1.0
+        if sym in holding.index:
+            for k in shareholding.COLUMNS:
+                out.loc[sym, k] = holding.loc[sym, k]
     return out
 
 

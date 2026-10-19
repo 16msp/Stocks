@@ -16,7 +16,7 @@ from strategies import sector_scanner as scanner  # noqa: E402
 from strategies.config import get_setting  # noqa: E402
 from strategies.holdings_style import style_holdings  # noqa: E402
 from strategies.scan_all import scan_all_sectors  # noqa: E402
-from strategies.scan_ui import favourite_symbols, render_card, screener_url, tradingview_url  # noqa: E402
+from strategies.scan_ui import HOLDING_CONFIG, favourite_symbols, render_card, screener_url, tradingview_url  # noqa: E402
 
 st.set_page_config(page_title="Stock Screener", page_icon="🎛️", layout="wide")
 
@@ -77,6 +77,11 @@ NUMERIC = {
         ("RS 1M", "RS 1M vs Nifty (pts)", 100, 1, "%.0f%%", None, None),
         ("RS 3M", "RS 3M vs Nifty (pts)", 100, 1, "%.0f%%", None, None),
         ("vs 200DMA", "vs 200DMA (%)", 100, 1, "%.0f%%", None, None),
+    ],
+    "Shareholding (NSE quarterly filings)": [
+        ("Public Δ 1Y", "Change in public holding, 1 year (pts)", 1, 0.25, "%.2f", None, None),
+        ("Public Δ 1Q", "Change in public holding, 1 quarter (pts)", 1, 0.25, "%.2f", None, None),
+        ("Public Holding", "Public holding (%)", 1, 1, "%.0f%%", 0, 100),
     ],
     "Volume": [
         ("Up/Down Vol", "Up/Down volume (x)", 1, 0.1, "%.1fx", 0, None),
@@ -221,7 +226,7 @@ table_tab, cards_tab = st.tabs(["📊 Table", "🃏 Cards (top 30 by Buy Score)"
 
 with table_tab:
     cols = ["Stock", "Sector", "Recommendation", "Buy Score", "CMP", "52W High Drop", "ATH Drop", "Off 52W Low", "Days Since Low", "RSI 14",
-            "RS 1M", "RS 3M", "vs 200DMA", "Vol Trend", "Up/Down Vol", "Overhead Supply", "Supply to +25%",
+            "RS 1M", "RS 3M", "Public Holding", "Public Δ 1Q", "Public Δ 1Y", "vs 200DMA", "Vol Trend", "Up/Down Vol", "Overhead Supply", "Supply to +25%",
             "Volatility Ratio", "vs POC", "VP Zone", "Avg Value 20D", "Owned", "Why"]
     view = res[[c for c in cols if c in res.columns]].copy()
     view.insert(1, "TradingView", view["Stock"].map(tradingview_url))
@@ -240,6 +245,7 @@ with table_tab:
             "CMP": st.column_config.NumberColumn(format="%.2f"),
             "52W High Drop": st.column_config.NumberColumn(format="percent"),
             "ATH Drop": st.column_config.NumberColumn(format="percent", help="From the all-time closing high (since listing). 0% = at its all-time high. Yahoo does not adjust for demergers, so a stock that demerged can show a bigger drop than a holder actually lost."),
+            **HOLDING_CONFIG,
             "Off 52W Low": st.column_config.NumberColumn(format="percent", help="Bounce off the 52-week low"),
             "Days Since Low": st.column_config.NumberColumn(format="%.0f"),
             "RSI 14": st.column_config.NumberColumn(format="%.0f"),
@@ -269,9 +275,8 @@ with table_tab:
         to_remove = sorted((shown & fav_now) - want)
         sector_map = dict(zip(res["Stock"], res["Sector"]))
         try:
-            for sym in to_add:
-                favourites.add(sym, sector_map.get(sym, "").split(", ")[0])
-            favourites.remove(to_remove)
+            favourites.add_many([(sym, sector_map.get(sym, "").split(", ")[0]) for sym in to_add], source="screener-table")
+            favourites.remove(to_remove, source="screener-table")
             favourite_symbols(refresh=True)
             st.session_state["screener_flash"] = f"Added {len(to_add)} favourite(s), removed {len(to_remove)}."
             st.rerun()
