@@ -9,6 +9,8 @@ Rules, kept deliberately simple:
   against runaway clicks; every new trade records when it was made);
 - every buy also stores a snapshot of the card's technicals (SIGNAL_FIELDS) so that, months later, the trades can be
   compared with how they turned out.
+- Mean Reversion trades (strategy MEANREV) are the exception to "executes at the last close": they are recorded as an order at the signal close, then settled
+  by fill_entry at the next session's open, and sold at the open after the exit signal (sell with on_date), as the backtest assumes.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from strategies import price_store
 
 BUDGET = 50_000  # rupees per transaction
 MAX_POSITIONS_PER_STOCK = 3  # open positions allowed in one stock at a time
-GENERAL, MINERVINI = "general", "minervini"  # which page a trade came from: the scanner/screener cards, or the Trend Template cards
+GENERAL, MINERVINI, MEANREV = "general", "minervini", "meanrev"  # which page a trade came from: the scanner/screener cards, the Trend Template cards, or the Mean Reversion page
 SAME_STOCK_SECONDS = 60  # the same stock cannot be bought twice within this many seconds
 MAX_BUYS_PER_MINUTE = 5  # across all stocks
 
@@ -74,7 +76,9 @@ def plan_snapshot(plan) -> dict:
 
 
 def strategy_of(value) -> str:
-    return MINERVINI if value == MINERVINI else GENERAL  # older trades have no value: they came from the scanner / screener / buy box
+    if value in (MINERVINI, MEANREV):
+        return value
+    return GENERAL  # older trades have no value: they came from the scanner / screener / buy box
 
 
 def parse_signals(text) -> dict:
@@ -158,7 +162,7 @@ def buy(symbol: str, sector: str, price: float, session: str | None, signals: di
         db.execute(
             "INSERT INTO paper_trades (id, symbol, sector, qty, buy_price, buy_date, buy_session, signals, created_at, strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (uuid.uuid4().hex, symbol, sector, qty, round(float(price), 2), date.today().isoformat(), session,
-             json.dumps(signals) if signals else None, now.isoformat(timespec="seconds"), MINERVINI if strategy == MINERVINI else GENERAL),
+             json.dumps(signals) if signals else None, now.isoformat(timespec="seconds"), strategy_of(strategy)),
         )
         db.commit()
     finally:
@@ -166,12 +170,32 @@ def buy(symbol: str, sector: str, price: float, session: str | None, signals: di
     return qty
 
 
-def sell(trade_id: str, price: float, session: str | None) -> None:
+def sell(trade_id: str, price: float, session: str | None, on_date: str | None = None, signals: dict | None = None) -> None:
+    """Close a position at `price`. `on_date` (ISO date) is the day the sale is dated; it defaults to today. `signals`, if given, replaces the stored snapshot."""
+    db = _db()
+    try:
+        if signals is None:
+            db.execute(
+                "UPDATE paper_trades SET sell_price = ?, sell_date = ?, sell_session = ? WHERE id = ? AND sell_price IS NULL",
+                (round(float(price), 2), on_date or date.today().isoformat(), session, trade_id),
+            )
+        else:
+            db.execute(
+                "UPDATE paper_trades SET sell_price = ?, sell_date = ?, sell_session = ?, signals = ? WHERE id = ? AND sell_price IS NULL",
+                (round(float(price), 2), on_date or date.today().isoformat(), session, json.dumps(signals), trade_id),
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
+def fill_entry(trade_id: str, price: float, session_date: str, qty: int, signals: dict) -> None:
+    """Settle a Mean Reversion order at the price it really got (the next session's open): price, quantity, buy date and the stored snapshot are replaced."""
     db = _db()
     try:
         db.execute(
-            "UPDATE paper_trades SET sell_price = ?, sell_date = ?, sell_session = ? WHERE id = ? AND sell_price IS NULL",
-            (round(float(price), 2), date.today().isoformat(), session, trade_id),
+            "UPDATE paper_trades SET buy_price = ?, buy_date = ?, buy_session = ?, qty = ?, signals = ? WHERE id = ? AND sell_price IS NULL",
+            (round(float(price), 2), session_date, session_date, int(qty), json.dumps(signals), trade_id),
         )
         db.commit()
     finally:
@@ -182,7 +206,7 @@ def set_strategy(trade_id: str, strategy: str) -> None:
     """Move a trade to the other section."""
     db = _db()
     try:
-        db.execute("UPDATE paper_trades SET strategy = ? WHERE id = ?", (MINERVINI if strategy == MINERVINI else GENERAL, trade_id))
+        db.execute("UPDATE paper_trades SET strategy = ? WHERE id = ?", (strategy_of(strategy), trade_id))
         db.commit()
     finally:
         db.close()

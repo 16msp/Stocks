@@ -1,4 +1,5 @@
-"""Streamlit page: paper-trading record in two sections: trades from the scanner / screener cards, and trades from the Minervini Trend Template cards."""
+"""Streamlit page: paper-trading record in sections: trades from the scanner / screener cards, trades from the Minervini Trend Template cards, and a pointer to the
+Mean Reversion page (those trades are managed there)."""
 
 import sys
 from datetime import date
@@ -366,7 +367,8 @@ def render_section(sub: pd.DataFrame, key: str, minervini: bool) -> None:
 
 std_trades = trades[trades["section"] == paper_trades.GENERAL]
 min_trades = trades[trades["section"] == paper_trades.MINERVINI]
-tab_std, tab_min = st.tabs([f"🛒 Scanner & screener trades ({len(std_trades)})", f"📐 Minervini trades ({len(min_trades)})"])
+mr_trades = trades[trades["section"] == paper_trades.MEANREV]
+tab_std, tab_min, tab_mr = st.tabs([f"🛒 Scanner & screener trades ({len(std_trades)})", f"📐 Minervini trades ({len(min_trades)})", f"📉 Mean reversion trades ({len(mr_trades)})"])
 
 with tab_std:
     # ---- new buy ----
@@ -403,6 +405,12 @@ with tab_min:
     )
     render_section(min_trades, "mnv", minervini=True)
 
+with tab_mr:
+    n_open = int(mr_trades["sell_price"].isna().sum())
+    st.info(f"{len(mr_trades)} mean-reversion paper trade(s), {n_open} open. These are bought at the **next session's open** and sold at the open after the exit signal "
+            "(not at the last close), so they are managed on their own page, which shows the exit status of each position.")
+    st.page_link("pages/9_Mean_Reversion.py", label="Open the Mean Reversion page", icon="📉")
+
 if not trades.empty:
     export = trades.copy()
     export["status"] = export["sell_price"].map(lambda v: "open" if pd.isna(v) else "closed")
@@ -414,7 +422,7 @@ if not trades.empty:
                        file_name="paper_trades.csv", mime="text/csv")
 
     with st.expander("Made a mistake? Remove a trade, or move it to the other section"):
-        labels = {r.id: f"{r.symbol} - bought {r.buy_date} at ₹{r.buy_price:,.2f}{'' if pd.isna(r.sell_price) else ' (sold)'} [{'Minervini' if r.section == paper_trades.MINERVINI else 'Scanner'}]"
+        labels = {r.id: f"{r.symbol} - bought {r.buy_date} at ₹{r.buy_price:,.2f}{'' if pd.isna(r.sell_price) else ' (sold)'} [{'Minervini' if r.section == paper_trades.MINERVINI else 'Mean reversion' if r.section == paper_trades.MEANREV else 'Scanner'}]"
                   for r in trades.itertuples()}
         chosen = st.selectbox("Trade", list(labels), index=None, format_func=labels.get, placeholder="Choose a trade...")
         c1, c2 = st.columns(2)
@@ -422,7 +430,9 @@ if not trades.empty:
             paper_trades.delete(chosen)
             st.session_state["paper_flash"] = "Trade removed."
             st.rerun()
-        if chosen is not None:
+        if chosen is not None and trades.loc[trades["id"] == chosen, "section"].iloc[0] == paper_trades.MEANREV:
+            c2.caption("Mean-reversion trades stay on their own page, so they cannot be moved.")
+        elif chosen is not None:
             current = trades.loc[trades["id"] == chosen, "section"].iloc[0]
             target = paper_trades.GENERAL if current == paper_trades.MINERVINI else paper_trades.MINERVINI
             if c2.button(f"↔️ Move to the {'Scanner' if target == paper_trades.GENERAL else 'Minervini'} section"):

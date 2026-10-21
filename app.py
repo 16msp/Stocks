@@ -35,6 +35,8 @@ st.markdown(
     "- **Sector Scanner** - pulls every NSE-listed stock in a sector (32 sectors: banks, finance, IT, pharma, FMCG, auto, metals and more), runs the same "
     "checks and gives each a recommendation: Accumulate, Strong - wait for dip, Watch, or Avoid. "
     "Pick a sector from the sidebar dropdown.\n"
+    "- **Mean Reversion** - an RSI(2) dip-buying strategy: lists stocks in a long-term uptrend that have just fallen several sessions in a row, with the exit rule, "
+    "paper trading (orders fill at the next open) and the backtest results.\n"
     "\nTechnicals only - check fundamentals before buying. Not investment advice."
 )
 
