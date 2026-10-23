@@ -1,0 +1,192 @@
+"""Streamlit page: a hand-picked watchlist of good, growth-oriented stocks, tracked by how far each is below its all-time closing high."""
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from strategies import dip_watchlist as dw  # noqa: E402
+from strategies import price_store  # noqa: E402
+from strategies.scan_all import scan_all_sectors  # noqa: E402
+from strategies.scan_ui import screener_url, tradingview_url  # noqa: E402
+
+st.set_page_config(page_title="Dip Watchlist", page_icon="🎯", layout="wide")
+
+from strategies.auth_gate import require_password  # noqa: E402
+
+require_password()
+st.title("🎯 Dip Watchlist")
+st.caption(
+    "A short list of good, growth-oriented businesses that you choose, tracked by how far each is below its all-time closing high. "
+    "The idea is to stay with a stock you believe in, add to it when it is far below its high, and sell as it recovers. "
+    "The page only times the entry: picking a good business is your job (check the fundamentals first). "
+    "A stock that really broke can stay down for years. Backtest results are past results, not a forecast. Not investment advice."
+)
+
+if st.session_state.get("dw_flash"):
+    st.success(st.session_state.pop("dw_flash"))
+
+full, _summaries = scan_all_sectors(0)
+one = full.drop_duplicates("Stock").set_index("Stock")
+company_of, sector_of = one["Company"].to_dict(), one["Sector"].to_dict()
+
+st.sidebar.header("Dip Watchlist")
+if st.sidebar.button("🔄 Recalculate", width="stretch"):
+    st.cache_data.clear()
+    st.rerun()
+st.sidebar.markdown("**Zones (below the all-time high)**")
+for start, name, meaning in dw.ZONES[::-1]:
+    st.sidebar.caption(f"**{name}** from {start:.0%}: {meaning}")
+
+try:
+    wl = dw.load()
+except Exception as exc:
+    st.error(f"Could not read the watchlist: {exc}")
+    st.stop()
+
+
+# ---------------------------------------------------------------- add
+def _add() -> None:
+    picked = st.session_state.get("dw_pick", [])
+    try:
+        n = dw.add(picked)
+        st.session_state["dw_flash"] = f"Added {n} stock(s) to the watchlist." + (f" {len(picked) - n} already on it." if len(picked) > n else "")
+        st.session_state["dw_pick"] = []
+    except Exception as exc:
+        st.session_state["dw_flash"] = f"Could not add: {exc}"
+
+
+with st.container(border=True):
+    on_list = set(wl["Stock"])
+    options = sorted(s for s in company_of if s not in on_list)
+    c1, c2 = st.columns([5, 1], vertical_alignment="bottom")
+    c1.multiselect("Add stocks to the watchlist", options, key="dw_pick", placeholder="Type a symbol or company name",
+                   format_func=lambda s: f"{s} - {company_of.get(s) or ''}".rstrip(" -"),
+                   help="Any stock in the app's sector lists (the ones whose prices are stored daily).")
+    c2.button("➕ Add", on_click=_add, width="stretch", disabled=not st.session_state.get("dw_pick"))
+
+if wl.empty:
+    st.info("The watchlist is empty. Add the good, growth-oriented stocks you would like to buy on a deep fall.")
+    st.stop()
+
+
+@st.cache_data(ttl=300, show_spinner="Reading the stored prices...")
+def _load(symbols: tuple) -> tuple:
+    return price_store.load_history(list(symbols)), price_store.load_ath(list(symbols))
+
+
+hist, aths = _load(tuple(sorted(wl["Stock"])))
+rows = []
+for r in wl.itertuples():
+    s = dw.status(hist.get(r.Stock), aths.get(r.Stock))
+    rows.append({"Stock": r.Stock, **(s or {})})
+t = pd.DataFrame(rows).merge(wl, on="Stock", how="left")
+t["Company"] = t["Stock"].map(company_of).fillna("")
+t["Sector"] = t["Stock"].map(sector_of).fillna("")
+no_price = t[t["CMP"].isna()]["Stock"].tolist()
+t = t[t["CMP"].notna()].sort_values("Drop from ATH", ascending=False).reset_index(drop=True)
+
+latest = t["Last session"].max() if not t.empty else None
+store = price_store.get_status(list(wl["Stock"]))
+if store:
+    st.caption(f"💾 Prices stored in {store['backend']}, latest session {latest or store['latest_session']}.")
+if no_price:
+    st.warning(f"No stored prices yet for: {', '.join(no_price)}. They appear after the next daily price job.")
+guess = t[~t["ath_known"].fillna(False).astype(bool)]["Stock"].tolist() if not t.empty else []
+if guess:
+    st.caption(f"ℹ️ The all-time high of {', '.join(guess)} is not stored yet (it is refreshed weekly), so the highest stored close (about 15 months) is used for now.")
+
+if t.empty:
+    st.stop()
+
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("On the watchlist", len(wl))
+m2.metric("🟢 In a buy zone (35%+ below)", int((t["Drop from ATH"] >= 0.35).sum()))
+m3.metric("🟠 Watching (25-35% below)", int(t["Drop from ATH"].between(0.25, 0.35, inclusive="left").sum()))
+m4.metric("⚪ Within 25% of the high", int((t["Drop from ATH"] < 0.25).sum()))
+
+# ---------------------------------------------------------------- table
+view = t[["Stock", "Company", "Zone", "Drop from ATH", "Drop 1W ago", "CMP", "ATH", "ATH date", "Off 52W low", "vs 200DMA", "Sector", "Note"]].copy()
+view.insert(2, "TradingView", view["Stock"].map(tradingview_url))
+view.insert(3, "Screener", view["Stock"].map(screener_url))
+view["Drop from ATH"] = -view["Drop from ATH"]
+view["Drop 1W ago"] = -view["Drop 1W ago"]
+view["Remove"] = False
+
+
+def _zone_style(z):
+    return {"Very deep": "background-color: #c6efce; color: #006100", "Deep buy zone": "background-color: #c6efce; color: #006100",
+            "Buy zone": "background-color: #e2f0d9; color: #375623", "Watch": "background-color: #fff2cc; color: #7f6000"}.get(z, "")
+
+
+st.caption("Sorted by the deepest fall first. Type in **Note** (why you own it, the fundamentals you checked), tick **Remove** to drop a stock, then press Save.")
+edited = st.data_editor(
+    view.style.map(_zone_style, subset=["Zone"]),
+    column_config={
+        "TradingView": st.column_config.LinkColumn("TradingView", display_text="📈 Chart"),
+        "Screener": st.column_config.LinkColumn("Screener", display_text="📊 Screener"),
+        "Drop from ATH": st.column_config.NumberColumn(format="percent", help="Last close against the all-time closing high (since listing). Yahoo does not adjust for demergers, so a demerged company can show a bigger fall than a holder actually lost."),
+        "Drop 1W ago": st.column_config.NumberColumn(format="percent", help="The same measure 5 sessions ago, to see whether the fall is still going."),
+        "CMP": st.column_config.NumberColumn(format="%.2f"),
+        "ATH": st.column_config.NumberColumn("All-time high", format="%.2f"),
+        "ATH date": st.column_config.DateColumn("High on", format="DD MMM YYYY"),
+        "Off 52W low": st.column_config.NumberColumn(format="percent", help="How far the price has come up from its lowest close of the last year."),
+        "vs 200DMA": st.column_config.NumberColumn(format="percent"),
+        "Note": st.column_config.TextColumn(width="large", help="Your own reminder, saved when you press Save"),
+        "Remove": st.column_config.CheckboxColumn(help="Tick and press Save to take it off the watchlist"),
+    },
+    disabled=[c for c in view.columns if c not in ("Note", "Remove")],
+    hide_index=True,
+    width="stretch",
+    height=35 * (len(view) + 1) + 3,
+    key="dw_editor",
+)
+
+if st.button("💾 Save notes and removals", type="primary"):
+    old = dict(zip(wl["Stock"], wl["Note"].fillna("")))
+    drop = [r.Stock for r in edited.itertuples() if r.Remove]
+    changed = {r.Stock: r.Note for r in edited.itertuples() if (r.Note or "") != old.get(r.Stock, "") and r.Stock not in drop}
+    try:
+        dw.set_notes(changed)
+        dw.remove(drop)
+        st.session_state["dw_flash"] = f"Saved {len(changed)} note change(s), removed {len(drop)} stock(s)."
+        st.rerun()
+    except Exception as exc:
+        st.error(f"Could not save: {exc}")
+
+# ---------------------------------------------------------------- chart
+st.subheader("Price against the all-time high")
+pick = st.selectbox("Stock", list(t["Stock"]), format_func=lambda s: f"{s} - {company_of.get(s) or ''}".rstrip(" -"))
+row = t[t["Stock"] == pick].iloc[0]
+close = hist[pick]["Close"].dropna()
+fig = go.Figure(go.Scatter(x=close.index, y=close.values, mode="lines", name="Close", line=dict(width=2)))
+for pct, colour in [(0, "#2e7d32"), (0.35, "#b7950b"), (0.45, "#d35400"), (0.55, "#c0392b")]:
+    level = row["ATH"] * (1 - pct)
+    fig.add_hline(y=level, line=dict(color=colour, dash="dot" if pct else "solid", width=1),
+                  annotation_text="all-time high" if pct == 0 else f"{pct:.0%} below", annotation_position="top left")
+fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0), showlegend=False, yaxis_title="₹")
+st.plotly_chart(fig, use_container_width=True)
+st.caption(f"{pick}: {row['Drop from ATH']:.1%} below its all-time high of ₹{row['ATH']:,.2f} ({row['ATH date']:%d %b %Y}); zone **{row['Zone']}**. "
+           "The chart shows the stored sessions only (about 15 months).")
+
+# ---------------------------------------------------------------- backtest
+with st.expander("What the backtest says about buying at each level"):
+    st.markdown(
+        "Every time a stock trading at least ₹25 crore a day fell through each level below its all-time closing high (781 NSE stocks, 2015 to Oct 2026), "
+        "I looked at what happened next, buying at the next open and counting costs. **Deeper was better**: the typical stock bought at 25% below did no better "
+        "than any other stock, while 45% and 55% below paid more, though not every stock recovers."
+    )
+    bt = pd.DataFrame(dw.BACKTEST_ROWS)
+    st.dataframe(bt, hide_index=True, width="stretch", column_config={
+        "Median after 12 months": st.column_config.NumberColumn(format="%.1f%%"), "Median after 24 months": st.column_config.NumberColumn(format="%.1f%%"),
+        "Positive after 24 months": st.column_config.NumberColumn(format="%d%%"), "Back to the old high within 3 years": st.column_config.NumberColumn(format="%d%%")})
+    st.markdown(
+        "- The list of stocks only contains companies that are still listed, so the ones that fell and never came back are missing: **real results will be weaker**.\n"
+        "- Signals bunch together in market-wide falls (2018, 2020, 2022, 2025), so many of your stocks can reach a buy zone in the same week.\n"
+        "- In a portfolio test, buying only 45%+ falls and selling on recovery made about 11 to 12% a year after tax, because money waits for signals and recoveries take 1.5 to 2 years. "
+        "The return on money actually invested was much higher; since you add money every month, waiting costs you less than it costs the test.\n"
+        "- Stocks that did not regain the old high within 3 years lost 20% to 90%, mostly small companies. Keep each position small enough to live with that."
+    )
