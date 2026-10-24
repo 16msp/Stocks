@@ -29,6 +29,13 @@ APP_PASSWORD = "choose-a-password"
 ```
 `APP_PASSWORD` puts a password prompt in front of every page. Leave it out locally.
 
+## 4. The "Run price update now" button (optional)
+GitHub's schedule is often late or skipped, so the app can start the same job itself. The button is in the sidebar of the home page, Mean Reversion and Dip Watchlist.
+1. GitHub -> Settings -> Developer settings -> Personal access tokens -> **Fine-grained tokens** -> Generate new token.
+2. Repository access: **Only select repositories** -> `16msp/Stocks`. Permissions -> Repository permissions -> **Actions: Read and write** (Metadata: Read-only is added automatically). Nothing else. Pick an expiry you can live with (e.g. 1 year).
+3. Streamlit Cloud -> app -> Settings -> Secrets: add `GITHUB_DISPATCH_TOKEN = "github_pat_..."` (never put it in the repo).
+The button only starts a run when you press it, refuses while a run is already waiting or running, and waits a minute between clicks. Anyone who can open the app (see `APP_PASSWORD`) can press it, which can only start the price job. If the token expires or is revoked the sidebar says so and the button stops working; nothing else is affected.
+
 ## Things to know
 - **Only Position Guide and Sector Scanner are cloud-ready.** The ETF pages keep their data in the local SQLite file and will start empty on the hosted app.
 - **Your sheet is link-shared.** The hosted app (and the job) read it through its "anyone with the link" CSV export, so anyone who has that link can read your holdings. Keep the link out of public places.

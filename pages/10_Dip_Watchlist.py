@@ -10,6 +10,7 @@ import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from strategies import dip_watchlist as dw  # noqa: E402
+from strategies import price_job_ui  # noqa: E402
 from strategies import price_store  # noqa: E402
 from strategies.scan_all import scan_all_sectors  # noqa: E402
 from strategies.scan_ui import screener_url, tradingview_url  # noqa: E402
@@ -39,6 +40,7 @@ st.sidebar.header("Dip Watchlist")
 if st.sidebar.button("🔄 Recalculate", width="stretch"):
     st.cache_data.clear()
     st.rerun()
+price_job_ui.sidebar_price_update()
 st.sidebar.markdown("**Zones (below the all-time high)**")
 for start, name, meaning in dw.ZONES[::-1]:
     st.sidebar.caption(f"**{name}** from {start:.0%}: {meaning}")

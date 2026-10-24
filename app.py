@@ -24,6 +24,10 @@ from strategies.auth_gate import require_password  # noqa: E402
 
 require_password()
 
+from strategies import price_job_ui  # noqa: E402
+
+price_job_ui.sidebar_price_update()
+
 st.title("📈 Stock Analysis Dashboard")
 st.write("Technical analysis for NSE stocks. Pick a page from the sidebar.")
 
@@ -37,6 +41,7 @@ st.markdown(
     "Pick a sector from the sidebar dropdown.\n"
     "- **Mean Reversion** - an RSI(2) dip-buying strategy: lists stocks in a long-term uptrend that have just fallen several sessions in a row, with the exit rule, "
     "paper trading (orders fill at the next open) and the backtest results.\n"
+    "- **Dip Watchlist** - a hand-picked list tracked by its fall from the all-time high with a turn signal (has it stopped falling?), and a scan of every stock for deep falls that have turned.\n"
     "\nTechnicals only - check fundamentals before buying. Not investment advice."
 )
 
