@@ -40,6 +40,9 @@ if st.sidebar.button("🔄 Recalculate", width="stretch"):
 st.sidebar.markdown("**Zones (below the all-time high)**")
 for start, name, meaning in dw.ZONES[::-1]:
     st.sidebar.caption(f"**{name}** from {start:.0%}: {meaning}")
+st.sidebar.markdown("**Turn signal (has it stopped falling?)**")
+for name, meaning in dw.STAGES:
+    st.sidebar.caption(f"**{name}**: {meaning}")
 
 try:
     wl = dw.load()
@@ -75,13 +78,14 @@ if wl.empty:
 
 @st.cache_data(ttl=300, show_spinner="Reading the stored prices...")
 def _load(symbols: tuple) -> tuple:
-    return price_store.load_history(list(symbols)), price_store.load_ath(list(symbols))
+    return price_store.load_history(list(symbols) + ["^NSEI"]), price_store.load_ath(list(symbols))
 
 
 hist, aths = _load(tuple(sorted(wl["Stock"])))
+nifty = hist["^NSEI"]["Close"] if "^NSEI" in hist else None
 rows = []
 for r in wl.itertuples():
-    s = dw.status(hist.get(r.Stock), aths.get(r.Stock))
+    s = dw.status(hist.get(r.Stock), aths.get(r.Stock), nifty)
     rows.append({"Stock": r.Stock, **(s or {})})
 t = pd.DataFrame(rows).merge(wl, on="Stock", how="left")
 t["Company"] = t["Stock"].map(company_of).fillna("")
@@ -102,29 +106,47 @@ if guess:
 if t.empty:
     st.stop()
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("On the watchlist", len(wl))
 m2.metric("🟢 In a buy zone (35%+ below)", int((t["Drop from ATH"] >= 0.35).sum()))
 m3.metric("🟠 Watching (25-35% below)", int(t["Drop from ATH"].between(0.25, 0.35, inclusive="left").sum()))
 m4.metric("⚪ Within 25% of the high", int((t["Drop from ATH"] < 0.25).sum()))
+m5.metric("🚀 Turning (35%+ below)", int(((t["Drop from ATH"] >= 0.35) & t["Turn signal"].isin(["Turning", "Confirmed turn"])).sum()),
+          help="Stocks 35% or more below their high that have stopped making new lows for 6 months and are back above the 200-day average.")
 
 # ---------------------------------------------------------------- table
-view = t[["Stock", "Company", "Zone", "Drop from ATH", "Drop 1W ago", "CMP", "ATH", "ATH date", "Off 52W low", "vs 200DMA", "Sector", "Note"]].copy()
+view = t[["Stock", "Company", "Zone", "Turn signal", "Drop from ATH", "Drop 1W ago", "Days since low", "Off 52W low", "vs 200DMA", "Volume ratio", "RS 6M",
+          "CMP", "ATH", "ATH date", "Sector", "Note"]].copy()
 view.insert(2, "TradingView", view["Stock"].map(tradingview_url))
 view.insert(3, "Screener", view["Stock"].map(screener_url))
 view["Drop from ATH"] = -view["Drop from ATH"]
 view["Drop 1W ago"] = -view["Drop 1W ago"]
 view["Remove"] = False
 
+_GREEN2, _GREEN, _LGREEN = "background-color: #a9d18e; color: #1e4620", "background-color: #c6efce; color: #006100", "background-color: #e2f0d9; color: #375623"
+_YELLOW, _ORANGE, _RED = "background-color: #fff2cc; color: #7f6000", "background-color: #fce4d6; color: #843c0c", "background-color: #ffc7ce; color: #9c0006"
+_ZONE = {"Very deep": _GREEN, "Deep buy zone": _GREEN, "Buy zone": _LGREEN, "Watch": _YELLOW}
+_STAGE = {"Still falling": _RED, "Stabilising": _ORANGE, "Base built": _YELLOW, "Turning early": _LGREEN, "Turning": _GREEN, "Confirmed turn": _GREEN2}
 
-def _zone_style(z):
-    return {"Very deep": "background-color: #c6efce; color: #006100", "Deep buy zone": "background-color: #c6efce; color: #006100",
-            "Buy zone": "background-color: #e2f0d9; color: #375623", "Watch": "background-color: #fff2cc; color: #7f6000"}.get(z, "")
+
+def _styles(df: pd.DataFrame) -> pd.DataFrame:
+    """Cell colours: green = what the backtest liked, red = what it did not."""
+    out = pd.DataFrame("", index=df.index, columns=df.columns)
+    out["Zone"] = df["Zone"].map(_ZONE).fillna("")
+    out["Turn signal"] = df["Turn signal"].map(_STAGE).fillna("")
+    out["Days since low"] = [("" if pd.isna(d) else _RED if d < dw.FALLING_SESSIONS else _ORANGE if d < dw.BASE_SESSIONS else _GREEN) for d in df["Days since low"]]
+    out["Off 52W low"] = [("" if pd.isna(v) else _GREEN if v >= 0.5 else _LGREEN if v >= 0.3 else "") for v in df["Off 52W low"]]
+    out["vs 200DMA"] = [("" if pd.isna(v) else _GREEN if v > 0 else _RED) for v in df["vs 200DMA"]]
+    out["RS 6M"] = [("" if pd.isna(v) else _GREEN if v > 0 else _RED) for v in df["RS 6M"]]
+    # Rising volume only counts once the price is above the 200-day average; below it, it can just be selling.
+    out["Volume ratio"] = [("" if pd.isna(v) else (_GREEN2 if above else _YELLOW) if v >= dw.VOLUME_RISING else _ORANGE if v < 0.7 else "")
+                           for v, above in zip(df["Volume ratio"], df["vs 200DMA"].fillna(-1) > 0)]
+    return out
 
 
-st.caption("Sorted by the deepest fall first. Type in **Note** (why you own it, the fundamentals you checked), tick **Remove** to drop a stock, then press Save.")
+st.caption("Sorted by the deepest fall first. Green cells are what the backtest liked (no new low for 6 months, above the 200-day average, rising volume above it); red is what it did not. Type in **Note** (why you own it, the fundamentals you checked), tick **Remove** to drop a stock, then press Save.")
 edited = st.data_editor(
-    view.style.map(_zone_style, subset=["Zone"]),
+    view.style.apply(_styles, axis=None),
     column_config={
         "TradingView": st.column_config.LinkColumn("TradingView", display_text="📈 Chart"),
         "Screener": st.column_config.LinkColumn("Screener", display_text="📊 Screener"),
@@ -133,8 +155,12 @@ edited = st.data_editor(
         "CMP": st.column_config.NumberColumn(format="%.2f"),
         "ATH": st.column_config.NumberColumn("All-time high", format="%.2f"),
         "ATH date": st.column_config.DateColumn("High on", format="DD MMM YYYY"),
-        "Off 52W low": st.column_config.NumberColumn(format="percent", help="How far the price has come up from its lowest close of the last year."),
-        "vs 200DMA": st.column_config.NumberColumn(format="percent"),
+        "Turn signal": st.column_config.TextColumn(help="Has the stock stopped falling and turned? Still falling, Stabilising, Base built, Turning early, Turning, Confirmed turn. See the legend in the sidebar."),
+        "Days since low": st.column_config.NumberColumn("Days since 52W low", format="%d", help="Sessions since the lowest close of the last year. Red under 20 (still making new lows), orange under 120, green from 120 (about 6 months without a new low)."),
+        "Off 52W low": st.column_config.NumberColumn(format="percent", help="How far the price has come up from its lowest close of the last year. Green from 50%, light green from 30%."),
+        "vs 200DMA": st.column_config.NumberColumn("vs 200DMA", format="percent", help="Price against its 200-day average. Green above, red below."),
+        "Volume ratio": st.column_config.NumberColumn("Volume 50d/250d", format="%.2fx", help="Average volume of the last 50 sessions against the last 250. Dark green: 1.2x or more with the price above the 200-day average (the case the backtest liked). Yellow: 1.2x or more but still below the 200-day average (could be selling). Orange: below 0.7x (volume dried up)."),
+        "RS 6M": st.column_config.NumberColumn("6M vs Nifty", format="percent", help="Price change over the last 126 sessions minus Nifty's. Green = beating the index."),
         "Note": st.column_config.TextColumn(width="large", help="Your own reminder, saved when you press Save"),
         "Remove": st.column_config.CheckboxColumn(help="Tick and press Save to take it off the watchlist"),
     },
@@ -163,13 +189,16 @@ pick = st.selectbox("Stock", list(t["Stock"]), format_func=lambda s: f"{s} - {co
 row = t[t["Stock"] == pick].iloc[0]
 close = hist[pick]["Close"].dropna()
 fig = go.Figure(go.Scatter(x=close.index, y=close.values, mode="lines", name="Close", line=dict(width=2)))
+dma = close.rolling(200).mean().dropna()
+if not dma.empty:
+    fig.add_trace(go.Scatter(x=dma.index, y=dma.values, mode="lines", name="200-day average", line=dict(width=1.5, color="#7f7f7f", dash="dash")))
 for pct, colour in [(0, "#2e7d32"), (0.35, "#b7950b"), (0.45, "#d35400"), (0.55, "#c0392b")]:
     level = row["ATH"] * (1 - pct)
     fig.add_hline(y=level, line=dict(color=colour, dash="dot" if pct else "solid", width=1),
                   annotation_text="all-time high" if pct == 0 else f"{pct:.0%} below", annotation_position="top left")
-fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0), showlegend=False, yaxis_title="₹")
+fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0), showlegend=True, legend=dict(orientation="h", y=1.08), yaxis_title="₹")
 st.plotly_chart(fig, use_container_width=True)
-st.caption(f"{pick}: {row['Drop from ATH']:.1%} below its all-time high of ₹{row['ATH']:,.2f} ({row['ATH date']:%d %b %Y}); zone **{row['Zone']}**. "
+st.caption(f"{pick}: {row['Drop from ATH']:.1%} below its all-time high of ₹{row['ATH']:,.2f} ({row['ATH date']:%d %b %Y}); zone **{row['Zone']}**, turn signal **{row['Turn signal']}**. "
            "The chart shows the stored sessions only (about 15 months).")
 
 # ---------------------------------------------------------------- backtest
@@ -183,6 +212,12 @@ with st.expander("What the backtest says about buying at each level"):
     st.dataframe(bt, hide_index=True, width="stretch", column_config={
         "Median after 12 months": st.column_config.NumberColumn(format="%.1f%%"), "Median after 24 months": st.column_config.NumberColumn(format="%.1f%%"),
         "Positive after 24 months": st.column_config.NumberColumn(format="%d%%"), "Back to the old high within 3 years": st.column_config.NumberColumn(format="%d%%")})
+    st.markdown("**And once a stock is 70%+ below its high, what preceded the recoveries** (12 months after buying at the next open):")
+    tb = pd.DataFrame(dw.BACKTEST_TURN_ROWS)
+    st.dataframe(tb, hide_index=True, width="stretch", column_config={
+        "Median after 12 months": st.column_config.NumberColumn(format="%.1f%%"), "Lost 30%+": st.column_config.NumberColumn("Lost 30% or more", format="%d%%"),
+        "Positive after 12 months": st.column_config.NumberColumn(format="%d%%")})
+    st.markdown("Waiting for the turn gives up the first leg of the recovery, often 30 to 50% off the low, but cut the share that lost another 30% from about 40% to 7%. Falling-knife buying (a new low in the last month) was flat after a year.")
     st.markdown(
         "- The list of stocks only contains companies that are still listed, so the ones that fell and never came back are missing: **real results will be weaker**.\n"
         "- Signals bunch together in market-wide falls (2018, 2020, 2022, 2025), so many of your stocks can reach a buy zone in the same week.\n"
