@@ -48,6 +48,7 @@ def zone_of(drop: float) -> str:
 # Turn signal, from the backtest of stocks 70%+ below their high (see BACKTEST_TURN_ROWS). Sessions = trading days.
 BASE_SESSIONS = 120  # no new 52-week low for about 6 months
 FALLING_SESSIONS = 20  # a new 52-week low within the last month
+BAD_MOVE_DOWN, BAD_MOVE_UP = -0.35, 0.60  # a one-day move beyond these in the last year: likely a demerger, split or bad print (the backtest left such stocks out)
 VOLUME_RISING = 1.2  # 50-day average volume against the 250-day average
 
 # (stage, what it means), worst to best
@@ -182,13 +183,16 @@ def status(history: pd.DataFrame | None, ath: tuple | None, nifty_close: pd.Seri
         if len(n) > 126 and n.index[-1] == close.index[-1]:
             rs6 = (last / float(close.iloc[-127]) - 1.0) - (float(n.iloc[-1]) / float(n.iloc[-127]) - 1.0)
     above_200 = bool(last > dma200) if not np.isnan(dma200) else None
+    value_cr = float((close * vol).iloc[-20:].median() / 1e7) if vol.iloc[-20:].notna().any() else np.nan
+    moves = close.iloc[-253:].pct_change().dropna()
+    big_move = bool(((moves < BAD_MOVE_DOWN) | (moves > BAD_MOVE_UP)).any())
     return {
         "CMP": last, "ATH": top, "ATH date": top_date, "ath_known": known, "Drop from ATH": drop, "Zone": zone_of(drop),
         "Drop 1W ago": 1.0 - week_ago / top if not np.isnan(week_ago) else np.nan,
         "Off 52W low": last / float(window.min()) - 1.0,
         "Days since low": days_since_low,
         "vs 200DMA": last / dma200 - 1.0 if not np.isnan(dma200) else np.nan,
-        "Volume ratio": volume_ratio, "RS 6M": rs6,
+        "Volume ratio": volume_ratio, "RS 6M": rs6, "Value Cr": value_cr, "Big move": big_move,
         "Turn signal": stage_of(days_since_low, above_200, volume_ratio),
         "Last session": close.index[-1].date(),
     }
