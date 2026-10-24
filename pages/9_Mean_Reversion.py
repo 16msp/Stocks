@@ -10,6 +10,7 @@ import streamlit as st
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from strategies import market_trend, paper_trades, price_store  # noqa: E402
 from strategies import mean_reversion as mr  # noqa: E402
+from strategies import price_job_ui  # noqa: E402
 from strategies.scan_all import scan_all_sectors  # noqa: E402
 from strategies.scan_ui import paper_open_counts, screener_url, tradingview_url  # noqa: E402
 
@@ -39,6 +40,7 @@ min_value = st.sidebar.slider("Minimum traded value (₹ cr/day)", 1.0, 50.0, mr
 if st.sidebar.button("🔄 Recalculate", width="stretch"):
     st.cache_data.clear()
     st.rerun()
+price_job_ui.sidebar_price_update()
 
 SYMBOLS = tuple(sorted(set(full["Stock"])))
 
