@@ -22,7 +22,11 @@ import numpy as np
 import pandas as pd
 import requests
 
+from functools import lru_cache
+
 from strategies import position_guide as pg
+from strategies import price_store
+from strategies import sector_groups
 
 EQUITY_LIST_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 CACHE_PATH = Path(__file__).resolve().parent.parent / "sector_universe_cache.json"
@@ -432,6 +436,81 @@ def recommend(row: pd.Series) -> tuple[str, str]:
     return label, why
 
 
+# Column names for relative strength measured against the sector's own index
+# ETF (rather than Nifty 50), one per RS window.
+SECTOR_RS_COLUMNS = [f"RS {w} (Sector)" for w in pg.RS_WINDOWS]
+
+
+@lru_cache(maxsize=None)
+def representative_etf(group_key: str, recent_days: int = 20) -> str | None:
+    """The single most-liquid ETF tracking a sector group.
+
+    When several ETFs track the same sector index, the one with the highest
+    average daily volume over the last `recent_days` sessions is picked. Cached
+    per process; the price-store top-up is incremental so repeat calls are cheap.
+    """
+    syms = list(sector_groups.SECTOR_GROUPS.get(group_key, []))
+    if not syms:
+        return None
+    try:
+        price_store.update_prices(syms)
+        hist = price_store.load_history(syms)
+    except Exception:
+        return None
+    best, best_vol = None, -1.0
+    for sym in syms:
+        h = hist.get(sym)
+        if h is None or h.empty or "Volume" not in h:
+            continue
+        vol = h["Volume"].dropna().tail(recent_days)
+        avg = float(vol.mean()) if len(vol) else 0.0
+        if avg > best_vol:
+            best, best_vol = sym, avg
+    return best
+
+
+def sector_benchmark(sector: str) -> tuple[str | None, dict]:
+    """Resolve a sector's representative ETF and the per-window RS adjustment.
+
+    RS vs the sector ETF = (stock return - Nifty return) + (Nifty return - ETF
+    return). The second term is the same for every stock in the sector, so we
+    return that per-window shift to add onto the existing vs-Nifty RS columns.
+    Returns (etf_symbol, {window: shift}); ({}/None) when no sector ETF applies.
+    """
+    group = sector_groups.SCANNER_SECTOR_ETF_GROUP.get(sector)
+    if not group:
+        return None, {}
+    etf = representative_etf(group)
+    if not etf:
+        return None, {}
+    try:
+        price_store.update_prices([etf, pg.NIFTY_TICKER])
+        hist = price_store.load_history([etf, pg.NIFTY_TICKER])
+    except Exception:
+        return etf, {}
+    etf_h, nifty_h = hist.get(etf), hist.get(pg.NIFTY_TICKER)
+    shift = {}
+    for w, d in pg.RS_WINDOWS.items():
+        er = pg._window_return(etf_h["Close"], d) if etf_h is not None and not etf_h.empty else np.nan
+        nr = pg._window_return(nifty_h["Close"], d) if nifty_h is not None and not nifty_h.empty else np.nan
+        shift[w] = nr - er
+    return etf, shift
+
+
+def all_sector_etfs() -> dict:
+    """Every sector group mapped to its single most-liquid tracking ETF.
+
+    Groups with no price data are skipped. Used by the Sector Scanner's ETF
+    picker, where each sector resolves to one representative index ETF.
+    """
+    out = {}
+    for group in sector_groups.SECTOR_GROUPS:
+        etf = representative_etf(group)
+        if etf:
+            out[group] = etf
+    return out
+
+
 def scan_sector(sector: str, market_stats: pd.DataFrame, universe: pd.DataFrame, owned: set | None = None) -> ScanResult:
     """Combine the universe with fetched market stats into the ranked recommendation table."""
     if universe.empty:
@@ -443,6 +522,13 @@ def scan_sector(sector: str, market_stats: pd.DataFrame, universe: pd.DataFrame,
     t["vs POC"] = t["CMP"] / t["VP POC"] - 1.0
     t["VP Zone"] = t.apply(pg._vp_zone, axis=1)
     t["Buy Score"] = t.apply(pg.buy_score, axis=1)
+
+    # RS vs the sector's own index ETF, added alongside the vs-Nifty RS columns.
+    sector_etf, rs_shift = sector_benchmark(sector)
+    for w in pg.RS_WINDOWS:
+        col = f"RS {w} (Sector)"
+        shift = rs_shift.get(w, np.nan)
+        t[col] = t[f"RS {w}"] + shift if pd.notna(shift) else np.nan
     # No history at all -> no score, rather than a misleading 0.
     no_data = t["Last Close"].isna()
     t.loc[no_data, "Buy Score"] = np.nan
@@ -463,6 +549,8 @@ def scan_sector(sector: str, market_stats: pd.DataFrame, universe: pd.DataFrame,
         "with_data": len(valid),
         "accumulate": int((t["Recommendation"] == "Accumulate").sum()),
         "median_rs3m": float(valid["RS 3M"].median()) if len(valid) else np.nan,
+        "sector_etf": sector_etf,
+        "median_rs3m_sector": float(valid["RS 3M (Sector)"].median()) if (len(valid) and "RS 3M (Sector)" in valid) else np.nan,
         "median_drop": float(valid["52W High Drop"].median()) if len(valid) else np.nan,
         "above_200dma": float((valid["vs 200DMA"] > 0).mean()) if len(valid) else np.nan,
         "median_score": float(valid["Buy Score"].median()) if len(valid) else np.nan,

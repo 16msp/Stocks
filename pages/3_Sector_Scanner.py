@@ -53,6 +53,19 @@ def _cached_owned(source: str):
     return set(pg.load_open_positions(source)["Stock"].dropna().unique())
 
 
+@st.cache_data(ttl=3600, show_spinner="Resolving each sector's index ETF...")
+def _cached_sector_etfs(nonce: int):
+    return scanner.all_sector_etfs()
+
+
+@st.cache_data(ttl=3600, show_spinner="Loading ETF card...")
+def _cached_etf_card(symbol: str, label: str, nonce: int):
+    ms = pg.fetch_market_stats([symbol], force=nonce > 0)
+    uni = pd.DataFrame({"Stock": [symbol], "Company": [label]})
+    res = scanner.scan_sector(label, ms, uni)
+    return res.table if res.ok and not res.table.empty else None
+
+
 if "scan_nonce" not in st.session_state:
     st.session_state.scan_nonce = 0
 
@@ -103,6 +116,13 @@ c3.metric("Median drop from 52W high", f"{s['median_drop']:.0%}" if pd.notna(s["
 c4.metric("Above 200DMA", f"{s['above_200dma']:.0%}" if pd.notna(s["above_200dma"]) else "n/a")
 c5.metric("Accumulate calls", s["accumulate"])
 
+if s.get("sector_etf"):
+    rs_sec = s.get("median_rs3m_sector")
+    tail = f" — median RS 3M vs sector {rs_sec:+.1%}" if pd.notna(rs_sec) else ""
+    st.caption(f"Sector RS benchmarked against **{s['sector_etf']}** (most-liquid {sector} index ETF){tail}.")
+else:
+    st.caption("No sector index ETF maps to this sector — the RS *(Sector)* columns are left blank.")
+
 if pd.notna(s["median_rs3m"]):
     if s["median_rs3m"] > 0.02 and s["above_200dma"] >= 0.5:
         verdict = "🟢 **Sector is leading Nifty** - tailwind for adds, favour the best-scored names."
@@ -127,6 +147,7 @@ with cards_tab:
         render_card(row, sector)
 with table_tab:
     cols = ["Pick", "Stock", "Company", "Owned", "Recommendation", "Buy Score", "Why", "CMP", "52W High Drop", "ATH Drop", "RS 1M", "RS 3M",
+            "RS 1M (Sector)", "RS 3M (Sector)",
             "Public Holding", "Public Δ 1Q", "Public Δ 1Y", "vs 200DMA", "Vol Trend", "Up/Down Vol", "Overhead Supply", "Supply to +25%", "RSI 14", "Days Since Low",
             "Volatility Ratio", "Off 52W Low", "vs POC", "VP Zone", "Avg Value 20D"]
     cols = [c for c in cols if c in t.columns]
@@ -151,8 +172,10 @@ with table_tab:
             "52W High Drop": st.column_config.NumberColumn(format="percent"),
             "ATH Drop": st.column_config.NumberColumn(format="percent", help="From the all-time closing high (since listing). 0% = at its all-time high. Yahoo does not adjust for demergers, so a stock that demerged can show a bigger drop than a holder actually lost."),
             **HOLDING_CONFIG,
-            "RS 1M": st.column_config.NumberColumn(format="percent"),
-            "RS 3M": st.column_config.NumberColumn(format="percent"),
+            "RS 1M": st.column_config.NumberColumn(format="percent", help="1-month return minus Nifty 50's"),
+            "RS 3M": st.column_config.NumberColumn(format="percent", help="3-month return minus Nifty 50's"),
+            "RS 1M (Sector)": st.column_config.NumberColumn(format="percent", help="1-month return minus the sector index ETF's"),
+            "RS 3M (Sector)": st.column_config.NumberColumn(format="percent", help="3-month return minus the sector index ETF's"),
             "vs 200DMA": st.column_config.NumberColumn(format="percent"),
             "Vol Trend": st.column_config.NumberColumn(format="%.2fx"),
             "Up/Down Vol": st.column_config.NumberColumn(format="%.2fx"),
@@ -174,6 +197,24 @@ with table_tab:
         file_name=f"{sector.lower().replace(' ', '_')}_scan.csv",
         mime="text/csv",
     )
+
+# ---- sector index ETFs ----
+st.divider()
+st.header("📦 Sector ETFs")
+st.caption("Each sector's own index ETF - the most-liquid one when several track the same index - "
+           "shown with the same card as the stocks above.")
+etf_map = _cached_sector_etfs(nonce)
+if not etf_map:
+    st.info("No sector ETFs available. Prices may not have been fetched yet.")
+else:
+    etf_labels = {f"{group} — {sym}": (group, sym) for group, sym in etf_map.items()}
+    etf_choice = st.selectbox("ETFs", list(etf_labels), key="sector_etf_pick")
+    etf_group, etf_sym = etf_labels[etf_choice]
+    etf_table = _cached_etf_card(etf_sym, f"{etf_group} index ETF", nonce)
+    if etf_table is None:
+        st.warning(f"No price history yet for {etf_sym}.")
+    else:
+        render_card(etf_table.iloc[0], sector=etf_group, key_prefix="etfcard")
 
 with st.expander("How the call is made / how to read the columns"):
     st.markdown(
