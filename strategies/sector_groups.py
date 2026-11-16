@@ -37,3 +37,44 @@ SECTOR_GROUPS = {
     "Tourism": ["MOTOUR"],
     "Commodities (equity)": ["COMMOIETF"],
 }
+
+
+# Maps each Sector Scanner sector (strategies.sector_scanner.SECTORS) to the
+# SECTOR_GROUPS key whose index ETF best proxies it, for benchmarking relative
+# strength against the sector instead of Nifty 50. None = no clean sector ETF
+# exists (RS-vs-sector is left blank for that sector rather than forced onto a
+# poor proxy). Edit freely as ETFs/sectors are added.
+SCANNER_SECTOR_ETF_GROUP = {
+    "Small Finance Banks": "Banking (broad)",
+    "Public Sector Banks": "PSU Banks",
+    "Private Banks": "Private Banks",
+    "NBFCs": "Financial Services (ex-bank)",
+    "Housing Finance": "Financial Services (ex-bank)",
+    "Insurance": "Financial Services (ex-bank)",
+    "Capital Markets": "Financial Services (ex-bank)",
+    "IT Services & Software": "IT / Technology",
+    "Pharma": "Pharma / Healthcare",
+    "FMCG": "FMCG / Consumption",
+    "Auto": "Auto / EV",
+    "Metals": "Metal / Mining",
+    "Realty": "Realty",
+    "Energy": "Energy / Oil & Gas / Power",
+    "Telecom": None,
+    "Infrastructure": "Infrastructure / PSE",
+    "Capital Goods": "Manufacturing",
+    "Cement & Building Materials": None,
+    "Chemicals": "Chemicals",
+    "Fertilisers & Agrochemicals": "Chemicals",
+    "Paper & Packaging": None,
+    "Textiles": None,
+    "Consumer Durables": "FMCG / Consumption",
+    "Retail & Consumer Discretionary": "FMCG / Consumption",
+    "Hotels, Travel & Aviation": "Tourism",
+    "Healthcare Services": "Pharma / Healthcare",
+    "Logistics & Shipping": None,
+    "Media & Entertainment": None,
+    "Defence & Shipbuilding": "Defence",
+    "Electronics (EMS)": "Manufacturing",
+    "Sugar & Agri": None,
+    "Internet & New-age": None,
+}
