@@ -53,19 +53,6 @@ def _cached_owned(source: str):
     return set(pg.load_open_positions(source)["Stock"].dropna().unique())
 
 
-@st.cache_data(ttl=3600, show_spinner="Resolving each sector's index ETF...")
-def _cached_sector_etfs(nonce: int):
-    return scanner.all_sector_etfs()
-
-
-@st.cache_data(ttl=3600, show_spinner="Loading ETF card...")
-def _cached_etf_card(symbol: str, label: str, nonce: int):
-    ms = pg.fetch_market_stats([symbol], force=nonce > 0)
-    uni = pd.DataFrame({"Stock": [symbol], "Company": [label]})
-    res = scanner.scan_sector(label, ms, uni)
-    return res.table if res.ok and not res.table.empty else None
-
-
 if "scan_nonce" not in st.session_state:
     st.session_state.scan_nonce = 0
 
@@ -197,24 +184,6 @@ with table_tab:
         file_name=f"{sector.lower().replace(' ', '_')}_scan.csv",
         mime="text/csv",
     )
-
-# ---- sector index ETFs ----
-st.divider()
-st.header("📦 Sector ETFs")
-st.caption("Each sector's own index ETF - the most-liquid one when several track the same index - "
-           "shown with the same card as the stocks above.")
-etf_map = _cached_sector_etfs(nonce)
-if not etf_map:
-    st.info("No sector ETFs available. Prices may not have been fetched yet.")
-else:
-    etf_labels = {f"{group} — {sym}": (group, sym) for group, sym in etf_map.items()}
-    etf_choice = st.selectbox("ETFs", list(etf_labels), key="sector_etf_pick")
-    etf_group, etf_sym = etf_labels[etf_choice]
-    etf_table = _cached_etf_card(etf_sym, f"{etf_group} index ETF", nonce)
-    if etf_table is None:
-        st.warning(f"No price history yet for {etf_sym}.")
-    else:
-        render_card(etf_table.iloc[0], sector=etf_group, key_prefix="etfcard")
 
 with st.expander("How the call is made / how to read the columns"):
     st.markdown(
