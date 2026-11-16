@@ -39,6 +39,25 @@ def _cached_sector_etfs(nonce: int):
     return scanner.all_sector_etfs()
 
 
+@st.cache_data(ttl=3600, show_spinner="Scoring every sector ETF...")
+def _cached_etf_overview(nonce: int):
+    """One sortable row per sector ETF: returns vs Nifty, RSI, trend, drop from
+    the all-time high and the Buy Score, so opportunities can be sorted out."""
+    etf_map = scanner.all_sector_etfs()
+    syms = list(etf_map.values())
+    if not syms:
+        return pd.DataFrame()
+    price_store.update_ath(syms, max_age_days=7)  # so "ATH Drop" is a true all-time figure
+    ms = pg.fetch_market_stats(syms, force=nonce > 0)
+    uni = pd.DataFrame({"Stock": syms, "Company": [f"{g} index ETF" for g in etf_map]})
+    res = scanner.scan_sector("Sector ETFs", ms, uni)
+    if not res.ok or res.table.empty:
+        return pd.DataFrame()
+    t = res.table.copy()
+    t["Sector"] = t["Stock"].map({sym: g for g, sym in etf_map.items()})
+    return t.rename(columns={"Stock": "ETF", "ATH Drop": "Drop from ATH"})
+
+
 @st.cache_data(ttl=3600, show_spinner="Updating prices and recalculating...")
 def _cached_etf_card(symbol: str, label: str, nonce: int):
     ms = pg.fetch_market_stats([symbol], force=nonce > 0)
@@ -67,6 +86,40 @@ if not etf_map:
     st.warning("No sector ETFs available yet. Prices may not have been fetched - try Refresh prices.")
     st.stop()
 
+# ---- sortable overview of every sector ETF ----
+st.subheader("All sector ETFs")
+st.caption("Sort any column to find opportunities - e.g. the most below the all-time high, "
+           "the strongest relative strength, or the highest Buy Score.")
+overview = _cached_etf_overview(nonce)
+if overview.empty:
+    st.info("No sector ETFs scored yet. Try Refresh prices.")
+else:
+    ov_cols = ["Sector", "ETF", "Recommendation", "Buy Score", "CMP", "Drop from ATH",
+               "52W High Drop", "RS 1M", "RS 3M", "RSI 14", "vs 200DMA", "Vol Trend", "Avg Value 20D"]
+    ov_cols = [c for c in ov_cols if c in overview.columns]
+    st.dataframe(
+        overview[ov_cols],
+        column_config={
+            "Buy Score": st.column_config.NumberColumn(format="%.0f", help="0-100 timing score"),
+            "CMP": st.column_config.NumberColumn(format="%.2f", help="Last completed daily close"),
+            "Drop from ATH": st.column_config.NumberColumn(format="percent", help="Last close against the all-time closing high"),
+            "52W High Drop": st.column_config.NumberColumn(format="percent"),
+            "RS 1M": st.column_config.NumberColumn(format="percent", help="1-month return minus Nifty 50's"),
+            "RS 3M": st.column_config.NumberColumn(format="percent", help="3-month return minus Nifty 50's"),
+            "RSI 14": st.column_config.NumberColumn(format="%.0f"),
+            "vs 200DMA": st.column_config.NumberColumn(format="percent"),
+            "Vol Trend": st.column_config.NumberColumn(format="%.2fx"),
+            "Avg Value 20D": st.column_config.NumberColumn(format="₹%.1f cr", help="Average daily traded value, last 20 sessions"),
+        },
+        hide_index=True, width="stretch", height=430,
+    )
+    st.download_button("⬇️ Download sector ETFs as CSV",
+                       overview[ov_cols].to_csv(index=False).encode("utf-8"),
+                       "sector_etfs.csv", "text/csv")
+
+# ---- drill down into one ETF ----
+st.divider()
+st.subheader("Drill into one ETF")
 labels = {f"{group} — {sym}": (group, sym) for group, sym in etf_map.items()}
 choice = st.selectbox("Sector ETF", list(labels))
 group, sym = labels[choice]
